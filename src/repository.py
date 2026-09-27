@@ -6,13 +6,16 @@ https://health.googleapis.com/$discovery/rest?version=v4
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
+from collections.abc import AsyncIterator
 
 import httpx
 
 from src.constants import (
     HEALTH_API_BASE_URL,
     HEALTH_API_MAX_ERROR_BODY_CHARS,
+    HEALTH_API_TIMEOUT_SECONDS,
     QUERY_MAX_DAYS,
     SESSION_PAGE_SIZE,
 )
@@ -32,9 +35,10 @@ class HealthRepository:
 
     async def fetch_activity_rollups(self, day: dt.date) -> dict[str, list[dict]]:
         data_types = ("steps", "distance", "total-calories", "active-minutes")
-        results = await asyncio.gather(
-            *(self._daily_rollup(data_type, day) for data_type in data_types)
-        )
+        async with self._client() as client:
+            results = await asyncio.gather(
+                *(self._daily_rollup(client, data_type, day) for data_type in data_types)
+            )
         return dict(zip(data_types, results, strict=True))
 
     async def fetch_sleep_sessions(self, day: dt.date) -> list[dict]:
@@ -43,53 +47,71 @@ class HealthRepository:
         sleep は開始時刻での絞り込みに対応していないため、終了時刻で絞る。
         """
         next_day = day + dt.timedelta(days=1)
-        return await self._list(
-            "sleep",
-            f'sleep.interval.civil_end_time >= "{day.isoformat()}" '
-            f'AND sleep.interval.civil_end_time < "{next_day.isoformat()}"',
-            page_size=SESSION_PAGE_SIZE,
-        )
+        async with self._client() as client:
+            return await self._list(
+                client,
+                "sleep",
+                f'sleep.interval.civil_end_time >= "{day.isoformat()}" '
+                f'AND sleep.interval.civil_end_time < "{next_day.isoformat()}"',
+                page_size=SESSION_PAGE_SIZE,
+            )
 
     async def fetch_heart_rate(self, day: dt.date) -> tuple[list[dict], list[dict]]:
         """(安静時心拍数のデータポイント, 心拍ゾーン滞在時間の日次集計) を返す。"""
         next_day = day + dt.timedelta(days=1)
-        resting, zones = await asyncio.gather(
-            self._list(
-                "daily-resting-heart-rate",
-                f'daily_resting_heart_rate.date >= "{day.isoformat()}" '
-                f'AND daily_resting_heart_rate.date < "{next_day.isoformat()}"',
-            ),
-            self._daily_rollup("time-in-heart-rate-zone", day),
-        )
+        async with self._client() as client:
+            resting, zones = await asyncio.gather(
+                self._list(
+                    client,
+                    "daily-resting-heart-rate",
+                    f'daily_resting_heart_rate.date >= "{day.isoformat()}" '
+                    f'AND daily_resting_heart_rate.date < "{next_day.isoformat()}"',
+                ),
+                self._daily_rollup(client, "time-in-heart-rate-zone", day),
+            )
         return resting, zones
 
     async def fetch_exercises(self, start: dt.date, end: dt.date) -> list[dict]:
         """start・end の両日を含む。"""
         points: list[dict] = []
-        for chunk_start, chunk_end in self.split_date_range(start, end, QUERY_MAX_DAYS):
-            exclusive_end = chunk_end + dt.timedelta(days=1)
-            points.extend(
-                await self._list(
-                    "exercise",
-                    f'exercise.interval.civil_start_time >= "{chunk_start.isoformat()}" '
-                    f'AND exercise.interval.civil_start_time < "{exclusive_end.isoformat()}"',
-                    page_size=SESSION_PAGE_SIZE,
+        async with self._client() as client:
+            for chunk_start, chunk_end in self.split_date_range(start, end, QUERY_MAX_DAYS):
+                exclusive_end = chunk_end + dt.timedelta(days=1)
+                points.extend(
+                    await self._list(
+                        client,
+                        "exercise",
+                        f'exercise.interval.civil_start_time >= "{chunk_start.isoformat()}" '
+                        f'AND exercise.interval.civil_start_time < "{exclusive_end.isoformat()}"',
+                        page_size=SESSION_PAGE_SIZE,
+                    )
                 )
-            )
         return points
 
+    @contextlib.asynccontextmanager
+    async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
+        """fetch_* 1回分の並列・ページング・分割リクエストで接続を共有するクライアント。
+
+        接続を常駐させないよう、fetch_* を抜けたら閉じる。
+        """
+        token = await self._auth_manager.get_access_token()
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=HEALTH_API_TIMEOUT_SECONDS,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as client:
+            yield client
+
+    @staticmethod
     async def _request(
-        self, method: str, path: str, *, params: dict | None = None, json: dict | None = None
+        client: httpx.AsyncClient,
+        method: str,
+        path: str,
+        *,
+        params: dict | None = None,
+        json: dict | None = None,
     ) -> dict:
-        token = self._auth_manager.get_access_token()
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=30.0) as client:
-            response = await client.request(
-                method,
-                path,
-                params=params,
-                json=json,
-                headers={"Authorization": f"Bearer {token}"},
-            )
+        response = await client.request(method, path, params=params, json=json)
         if response.status_code >= 400:
             raise HealthApiError(
                 f"Google Health API呼び出しに失敗しました: {response.status_code} "
@@ -97,24 +119,34 @@ class HealthRepository:
             )
         return response.json()
 
-    async def _daily_rollup(self, data_type: str, day: dt.date) -> list[dict]:
+    @staticmethod
+    async def _daily_rollup(
+        client: httpx.AsyncClient, data_type: str, day: dt.date
+    ) -> list[dict]:
         body = {
             "range": {
-                "start": self._civil_date(day),
-                "end": self._civil_date(day + dt.timedelta(days=1)),
+                "start": HealthRepository._civil_date(day),
+                "end": HealthRepository._civil_date(day + dt.timedelta(days=1)),
             },
             "windowSizeDays": 1,
         }
-        raw = await self._request("POST", f"/{data_type}/dataPoints:dailyRollUp", json=body)
+        raw = await HealthRepository._request(
+            client, "POST", f"/{data_type}/dataPoints:dailyRollUp", json=body
+        )
         return raw.get("rollupDataPoints", [])
 
-    async def _list(self, data_type: str, filter_: str, page_size: int | None = None) -> list[dict]:
+    @staticmethod
+    async def _list(
+        client: httpx.AsyncClient, data_type: str, filter_: str, page_size: int | None = None
+    ) -> list[dict]:
         points: list[dict] = []
         params: dict = {"filter": filter_}
         if page_size is not None:
             params["pageSize"] = page_size
         while True:
-            raw = await self._request("GET", f"/{data_type}/dataPoints", params=params)
+            raw = await HealthRepository._request(
+                client, "GET", f"/{data_type}/dataPoints", params=params
+            )
             points.extend(raw.get("dataPoints", []))
             next_page_token = raw.get("nextPageToken")
             if not next_page_token:

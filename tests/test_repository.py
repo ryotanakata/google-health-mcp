@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -15,7 +16,10 @@ BASE = "https://example.test/v4/users/me/dataTypes"
 
 @pytest.fixture
 def repository(settings, monkeypatch) -> HealthRepository:
-    monkeypatch.setattr(GoogleAuthManager, "get_access_token", lambda self: "fake-token")
+    async def fake_token(self):
+        return "fake-token"
+
+    monkeypatch.setattr(GoogleAuthManager, "get_access_token", fake_token)
     return HealthRepository(GoogleAuthManager(settings), base_url=BASE)
 
 
@@ -111,3 +115,49 @@ async def test_api_error_is_raised(repository):
     respx.get(f"{BASE}/sleep/dataPoints").mock(return_value=Response(403, text="forbidden"))
     with pytest.raises(HealthApiError, match="403"):
         await repository.fetch_sleep_sessions(dt.date(2026, 1, 2))
+
+
+@pytest.fixture
+def opened_clients(monkeypatch) -> list[httpx.AsyncClient]:
+    """repository が生成した httpx.AsyncClient を記録する。"""
+    clients: list[httpx.AsyncClient] = []
+    original = httpx.AsyncClient
+
+    def spy(*args, **kwargs):
+        client = original(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr("src.repository.httpx.AsyncClient", spy)
+    return clients
+
+
+@respx.mock
+async def test_parallel_requests_share_one_client(repository, opened_clients):
+    respx.post(url__regex=rf"{BASE}/.+/dataPoints:dailyRollUp").mock(
+        return_value=Response(200, json={})
+    )
+
+    await repository.fetch_activity_rollups(dt.date(2026, 1, 31))
+
+    # 4種類の並列リクエストが1つのクライアントを共有し、処理後に閉じられていること
+    assert respx.calls.call_count == 4
+    assert len(opened_clients) == 1
+    assert opened_clients[0].is_closed
+
+
+@respx.mock
+async def test_paging_and_chunks_share_one_client(repository, opened_clients):
+    respx.get(f"{BASE}/exercise/dataPoints").mock(
+        side_effect=[
+            Response(200, json={"dataPoints": [], "nextPageToken": "next"}),
+            Response(200, json={"dataPoints": []}),
+            Response(200, json={"dataPoints": []}),
+        ]
+    )
+
+    await repository.fetch_exercises(dt.date(2026, 1, 1), dt.date(2026, 4, 15))
+
+    assert respx.calls.call_count == 3
+    assert len(opened_clients) == 1
+    assert opened_clients[0].is_closed
