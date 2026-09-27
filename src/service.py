@@ -32,7 +32,7 @@ class HealthService:
     async def get_exercise_history(self, start_date: str, end_date: str) -> ExerciseHistory:
         start, end = self.parse_date(start_date), self.parse_date(end_date)
         if start > end:
-            raise ValueError("start_date must be on or before end_date")
+            raise ValueError("start_date には end_date 以前の日付を指定してください")
         points = await self._repository.fetch_exercises(start, end)
         sessions = sorted(
             (self.summarize_exercise(point.get("exercise", {})) for point in points),

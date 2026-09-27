@@ -126,9 +126,6 @@ class HealthRepository:
         start: dt.date, end: dt.date, max_days: int
     ) -> list[tuple[dt.date, dt.date]]:
         """start・end の両日を含む区間を、max_days 日以下の隙間のない区間に分ける。"""
-        if start > end:
-            raise ValueError("start_date must be on or before end_date")
-
         chunks: list[tuple[dt.date, dt.date]] = []
         cursor = start
         while cursor <= end:
