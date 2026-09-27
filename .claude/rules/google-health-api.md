@@ -16,7 +16,7 @@ paths:
 
 ## クエリ制約（README の Data Constraints）
 
-- 1リクエストの期間は `QUERY_MAX_DAYS`（90日）以下にする。heart-rate / active-minutes / total-calories / calories-in-heart-rate-zone の複数日集計は `SHORT_QUERY_MAX_DAYS`（14日）以下にする
+- 1リクエストの期間は `QUERY_MAX_DAYS`（90日）以下にする。heart-rate / active-minutes / total-calories / calories-in-heart-rate-zone の複数日集計は14日以下にする（現在の集計は1日単位のみ。複数日集計を追加するときは14日の上限を `constants.py` に定数として追加する）
 - 上限を超えうる期間は `HealthRepository.split_date_range` で分割して取得・結合する
 - list は `nextPageToken` がなくなるまでページングする。1ページ目だけで打ち切らない
 - exercise・sleep の `pageSize` は `SESSION_PAGE_SIZE`（25）以下にする
