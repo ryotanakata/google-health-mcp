@@ -40,9 +40,11 @@ def test_split_date_range_multiple_chunks():
     assert chunks[1] == (dt.date(2026, 4, 1), dt.date(2026, 4, 15))
 
 
-def test_split_date_range_invalid_order():
-    with pytest.raises(ValueError):
-        HealthRepository.split_date_range(dt.date(2026, 2, 1), dt.date(2026, 1, 1), max_days=90)
+def test_split_date_range_returns_empty_when_start_is_after_end():
+    chunks = HealthRepository.split_date_range(
+        dt.date(2026, 2, 1), dt.date(2026, 1, 1), max_days=90
+    )
+    assert chunks == []
 
 
 @respx.mock

@@ -5,11 +5,13 @@ import contextlib
 import hashlib
 import re
 import secrets
-import sys
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+from src.config import Settings
+from src.main import create_app
 
 PUBLIC_BASE_URL = "https://mcp.example.test"
 PASSPHRASE = "expected-secret"
@@ -28,19 +30,16 @@ INITIALIZE = {
 
 
 @pytest.fixture
-def main_module(monkeypatch):
-    monkeypatch.setenv("PUBLIC_BASE_URL", PUBLIC_BASE_URL)
-    monkeypatch.setenv("MCP_SHARED_SECRET", PASSPHRASE)
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id")
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
-    monkeypatch.setenv("GOOGLE_REFRESH_TOKEN", "token")
-    # src.main はモジュールロード時に Settings.from_env() を評価するため、
-    # 既にインポート済みならモジュールキャッシュを外して再読み込みする。
-    sys.modules.pop("src.main", None)
-    import src.main as module
-
-    yield module
-    sys.modules.pop("src.main", None)
+def app():
+    settings = Settings(
+        port=8080,
+        public_base_url=PUBLIC_BASE_URL,
+        mcp_shared_secret=PASSPHRASE,
+        google_client_id="id",
+        google_client_secret="secret",
+        google_refresh_token="token",
+    )
+    return create_app(settings)
 
 
 @contextlib.asynccontextmanager
@@ -115,8 +114,8 @@ async def _obtain_tokens(http, client: dict) -> dict:
     return {**token.json(), "_code": query["code"][0], "_verifier": verifier}
 
 
-async def test_mcp_requires_auth_and_points_to_resource_metadata(main_module):
-    async with _serve(main_module.app) as http:
+async def test_mcp_requires_auth_and_points_to_resource_metadata(app):
+    async with _serve(app) as http:
         response = await http.post("/mcp", json=INITIALIZE, headers=MCP_HEADERS)
         assert response.status_code == 401
         assert "resource_metadata=" in response.headers["www-authenticate"]
@@ -127,8 +126,8 @@ async def test_mcp_requires_auth_and_points_to_resource_metadata(main_module):
 
 
 
-async def test_rejects_invalid_bearer_token(main_module):
-    async with _serve(main_module.app) as http:
+async def test_rejects_invalid_bearer_token(app):
+    async with _serve(app) as http:
         response = await http.post(
             "/mcp", json=INITIALIZE, headers={**MCP_HEADERS, "Authorization": "Bearer wrong"}
         )
@@ -136,8 +135,8 @@ async def test_rejects_invalid_bearer_token(main_module):
 
 
 
-async def test_full_oauth_flow_allows_mcp_access(main_module):
-    async with _serve(main_module.app) as http:
+async def test_full_oauth_flow_allows_mcp_access(app):
+    async with _serve(app) as http:
         client = await _register(http)
         tokens = await _obtain_tokens(http, client)
 
@@ -173,8 +172,8 @@ async def test_full_oauth_flow_allows_mcp_access(main_module):
 
 
 
-async def test_oauth_flow_with_client_secret(main_module):
-    async with _serve(main_module.app) as http:
+async def test_oauth_flow_with_client_secret(app):
+    async with _serve(app) as http:
         client = await _register(http, token_endpoint_auth_method="client_secret_post")
         assert client["client_secret"]
         tokens = await _obtain_tokens(http, client)
@@ -182,8 +181,8 @@ async def test_oauth_flow_with_client_secret(main_module):
 
 
 
-async def test_refresh_token_grant(main_module):
-    async with _serve(main_module.app) as http:
+async def test_refresh_token_grant(app):
+    async with _serve(app) as http:
         client = await _register(http)
         tokens = await _obtain_tokens(http, client)
 
@@ -201,8 +200,8 @@ async def test_refresh_token_grant(main_module):
 
 
 
-async def test_authorization_code_cannot_be_reused(main_module):
-    async with _serve(main_module.app) as http:
+async def test_authorization_code_cannot_be_reused(app):
+    async with _serve(app) as http:
         client = await _register(http)
         tokens = await _obtain_tokens(http, client)
 
@@ -221,8 +220,8 @@ async def test_authorization_code_cannot_be_reused(main_module):
 
 
 
-async def test_wrong_passphrase_is_rejected(main_module, monkeypatch):
-    async with _serve(main_module.app) as http:
+async def test_wrong_passphrase_is_rejected(app, monkeypatch):
+    async with _serve(app) as http:
         monkeypatch.setattr("src.claude_auth.OAUTH_FAILED_LOGIN_DELAY_SECONDS", 0)
         client = await _register(http)
         login_url, _ = await _authorize(http, client["client_id"])
@@ -234,8 +233,8 @@ async def test_wrong_passphrase_is_rejected(main_module, monkeypatch):
 
 
 
-async def test_registration_rejects_unknown_redirect_uri(main_module):
-    async with _serve(main_module.app) as http:
+async def test_registration_rejects_unknown_redirect_uri(app):
+    async with _serve(app) as http:
         response = await http.post(
             "/register",
             json={
@@ -249,11 +248,11 @@ async def test_registration_rejects_unknown_redirect_uri(main_module):
 
 
 
-async def test_mcp_rejects_unexpected_host(main_module):
-    async with _serve(main_module.app) as http:
+async def test_mcp_rejects_unexpected_host(app):
+    async with _serve(app) as http:
         client = await _register(http)
         tokens = await _obtain_tokens(http, client)
-        transport = ASGITransport(app=main_module.app)
+        transport = ASGITransport(app=app)
         other = AsyncClient(transport=transport, base_url="https://evil.example")
         async with other:
             response = await other.post(

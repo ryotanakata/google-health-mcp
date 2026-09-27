@@ -24,7 +24,6 @@ HEALTH_API_BASE_URL = "https://health.googleapis.com/v4/users/me/dataTypes"
 # 1リクエストあたりのクエリ期間上限。
 # heart-rate / active-minutes / total-calories / calories-in-heart-rate-zone は14日、それ以外は90日
 QUERY_MAX_DAYS = 90
-SHORT_QUERY_MAX_DAYS = 14
 # exercise・sleep の list は pageSize の上限が25
 SESSION_PAGE_SIZE = 25
 HEALTH_API_MAX_ERROR_BODY_CHARS = 500

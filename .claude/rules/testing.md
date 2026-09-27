@@ -22,7 +22,7 @@ paths:
 | `main.py` | ASGI アプリに `httpx.ASGITransport` で接続し、OAuth のフロー全体（登録→認可→トークン→`/mcp`）を通す |
 
 - `main.py` のテストでは、lifespan の開始と終了を同じタスク内で行う（`_serve` のような async context manager を使う）。async fixture で lifespan を起動しない（anyio の cancel scope エラーになる）
-- `src.main` はインポート時に環境変数を読むため、テストでは環境変数を設定してから `sys.modules` を外して再インポートする
+- `main.py` のテストは、テスト用の `Settings` を `create_app(settings)` に渡してアプリを組み立てる（環境変数を設定しない）
 
 ## セキュリティのテスト
 
