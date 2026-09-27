@@ -16,55 +16,53 @@ from src.models import DailyActivity, ExerciseHistory, HeartRateSummary, SleepLo
 from src.repository import HealthRepository
 from src.service import HealthService
 
-load_dotenv()
-settings = Settings.from_env()
-health_service = HealthService(HealthRepository(GoogleAuthManager(settings)))
-claude_oauth_provider = ClaudeOAuthProvider(settings.mcp_shared_secret, settings.public_base_url)
 
-mcp = MCPServer(
-    "google-health",
-    auth_server_provider=claude_oauth_provider,
-    auth=AuthSettings(
-        issuer_url=settings.public_base_url,
-        resource_server_url=f"{settings.public_base_url}{MCP_PATH}",
-        required_scopes=[OAUTH_SCOPE],
-        client_registration_options=ClientRegistrationOptions(
-            enabled=True, valid_scopes=[OAUTH_SCOPE], default_scopes=[OAUTH_SCOPE]
+def create_app(settings: Settings) -> Starlette:
+    health_service = HealthService(HealthRepository(GoogleAuthManager(settings)))
+    claude_oauth_provider = ClaudeOAuthProvider(
+        settings.mcp_shared_secret, settings.public_base_url
+    )
+
+    mcp = MCPServer(
+        "google-health",
+        auth_server_provider=claude_oauth_provider,
+        auth=AuthSettings(
+            issuer_url=settings.public_base_url,
+            resource_server_url=f"{settings.public_base_url}{MCP_PATH}",
+            required_scopes=[OAUTH_SCOPE],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True, valid_scopes=[OAUTH_SCOPE], default_scopes=[OAUTH_SCOPE]
+            ),
+            # トークンは自前の署名鍵でしか発行されず、この MCP サーバー専用のため
+            # resource の照合は不要
+            validate_token_resource=False,
         ),
-        # トークンは自前の署名鍵でしか発行されず、この MCP サーバー専用のため resource の照合は不要
-        validate_token_resource=False,
-    ),
-)
+    )
 
+    @mcp.tool()
+    async def get_daily_activity(date: str) -> DailyActivity:
+        """指定日（YYYY-MM-DD）の歩数・消費カロリー・移動距離・アクティブ時間を取得する。"""
+        return await health_service.get_daily_activity(date)
 
-@mcp.tool()
-async def get_daily_activity(date: str) -> DailyActivity:
-    """指定日（YYYY-MM-DD）の歩数・消費カロリー・移動距離・アクティブ時間を取得する。"""
-    return await health_service.get_daily_activity(date)
+    @mcp.tool()
+    async def get_sleep_log(date: str) -> SleepLog:
+        """指定日（YYYY-MM-DD）の朝に終わった睡眠のログ（総睡眠時間・効率・ステージ内訳）を取得する。"""
+        return await health_service.get_sleep_log(date)
 
+    @mcp.tool()
+    async def get_heart_rate_summary(date: str) -> HeartRateSummary:
+        """指定日（YYYY-MM-DD）の安静時心拍数・心拍ゾーン滞在時間を取得する。"""
+        return await health_service.get_heart_rate_summary(date)
 
-@mcp.tool()
-async def get_sleep_log(date: str) -> SleepLog:
-    """指定日（YYYY-MM-DD）の朝に終わった睡眠のログ（総睡眠時間・効率・ステージ内訳）を取得する。"""
-    return await health_service.get_sleep_log(date)
+    @mcp.tool()
+    async def get_exercise_history(start_date: str, end_date: str) -> ExerciseHistory:
+        """期間内（YYYY-MM-DD〜YYYY-MM-DD、両端を含む）のワークアウトセッション履歴を取得する。"""
+        return await health_service.get_exercise_history(start_date, end_date)
 
+    mcp.custom_route(OAUTH_LOGIN_PATH, methods=["GET", "POST"])(
+        claude_oauth_provider.handle_login
+    )
 
-@mcp.tool()
-async def get_heart_rate_summary(date: str) -> HeartRateSummary:
-    """指定日（YYYY-MM-DD）の安静時心拍数・心拍ゾーン滞在時間を取得する。"""
-    return await health_service.get_heart_rate_summary(date)
-
-
-@mcp.tool()
-async def get_exercise_history(start_date: str, end_date: str) -> ExerciseHistory:
-    """期間内（YYYY-MM-DD〜YYYY-MM-DD、両端を含む）のワークアウトセッション履歴を取得する。"""
-    return await health_service.get_exercise_history(start_date, end_date)
-
-
-mcp.custom_route(OAUTH_LOGIN_PATH, methods=["GET", "POST"])(claude_oauth_provider.handle_login)
-
-
-def create_app() -> Starlette:
     # Cloud Run の公開ホスト名を明示的に許可する。未指定だと SDK は localhost 以外を 421 で拒否する
     public_host = urlparse(settings.public_base_url).netloc
     return mcp.streamable_http_app(
@@ -81,9 +79,9 @@ def create_app() -> Starlette:
     )
 
 
-app = create_app()
-
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=settings.port)
+    load_dotenv()
+    settings = Settings.from_env()
+    uvicorn.run(create_app(settings), host="0.0.0.0", port=settings.port)
