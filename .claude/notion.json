@@ -1,0 +1,19 @@
+{
+  "_comment": "Notion ID の正式参照元。ルーチンが参照する",
+  "database_id": "0ea6a8a9489f442383cb3b501ee3f067",
+  "data_source_id": "6334b5ec-c77b-4fb6-bf1f-3298b3a0ea32",
+  "status_property": "Status",
+  "status_values": {
+    "draft": "未起票",
+    "queue": "AI開発キュー",
+    "review": "AIレビュー待ち",
+    "reviewing": "レビュー中",
+    "done": "完了"
+  },
+  "type_property": "種別",
+  "id_prefix": "GHM",
+  "id_property_mcp": "userDefined:ID",
+  "repository": "ryotanakata/google-health-mcp",
+  "base_branch": "main",
+  "test_command": "ruff check . && pytest"
+}
