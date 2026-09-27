@@ -28,6 +28,7 @@ SHORT_QUERY_MAX_DAYS = 14
 # exercise・sleep の list は pageSize の上限が25
 SESSION_PAGE_SIZE = 25
 HEALTH_API_MAX_ERROR_BODY_CHARS = 500
+HEALTH_API_TIMEOUT_SECONDS = 30.0
 
 # --- Claude 側の認証・OAuth 2.1 認可サーバー（claude_auth.py） ---
 
