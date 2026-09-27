@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+client_secret.json
+token.json
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Claude Code
+.claude/settings.local.json
+.claude/tmp/
