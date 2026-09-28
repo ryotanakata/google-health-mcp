@@ -35,7 +35,7 @@ flowchart LR
 | `get_heart_rate_summary` | `date` | 安静時心拍数・心拍ゾーン別の滞在時間 |
 | `get_exercise_history` | `start_date`, `end_date` | ワークアウト：種目・時間・カロリー・平均心拍・距離 |
 
-日付は `YYYY-MM-DD`。期間は両端を含む。
+日付は `YYYY-MM-DD`。期間は両端を含み、最大366日。
 
 ## データ取得の制約
 

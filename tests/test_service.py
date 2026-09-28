@@ -173,3 +173,16 @@ async def test_reversed_range_is_rejected():
     with pytest.raises(ValueError, match="^start_date には end_date 以前の日付を指定してください$"):
         await HealthService(repository).get_exercise_history("2026-02-01", "2026-01-01")
     assert repository.calls == []
+
+
+async def test_range_up_to_max_days_is_accepted():
+    repository = FakeRepository()
+    await HealthService(repository).get_exercise_history("2025-01-01", "2026-01-01")
+    assert repository.calls == [("exercises", dt.date(2025, 1, 1), dt.date(2026, 1, 1))]
+
+
+async def test_range_over_max_days_is_rejected():
+    repository = FakeRepository()
+    with pytest.raises(ValueError, match="366 日以内"):
+        await HealthService(repository).get_exercise_history("2025-01-01", "2026-01-02")
+    assert repository.calls == []

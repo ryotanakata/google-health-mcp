@@ -22,6 +22,12 @@ GOOGLE_HEALTH_SCOPES = [
     "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
 ]
 
+# --- ツール入力の検証（service.py） ---
+
+# get_exercise_history の期間上限（両端を含む日数）。QUERY_MAX_DAYS ごとの分割は直列に
+# 送るため、期間が長いとリクエスト数に比例して応答が遅れ、API の利用枠も消費する
+EXERCISE_HISTORY_MAX_DAYS = 366
+
 # --- Google Health API（repository.py） ---
 
 # データポイント系エンドポイントの起点。

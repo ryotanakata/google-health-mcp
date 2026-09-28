@@ -35,7 +35,7 @@ flowchart LR
 | `get_heart_rate_summary` | `date` | Resting heart rate, time in heart rate zones |
 | `get_exercise_history` | `start_date`, `end_date` | Workouts: type, time, calories, average heart rate, distance |
 
-Dates are `YYYY-MM-DD`; ranges include both ends.
+Dates are `YYYY-MM-DD`; ranges include both ends and are limited to 366 days.
 
 ## Data Constraints
 

@@ -56,7 +56,7 @@ def create_app(settings: Settings) -> Starlette:
 
     @mcp.tool()
     async def get_exercise_history(start_date: str, end_date: str) -> ExerciseHistory:
-        """期間内（YYYY-MM-DD〜YYYY-MM-DD、両端を含む）のワークアウトセッション履歴を取得する。"""
+        """期間内（YYYY-MM-DD〜YYYY-MM-DD、両端を含む・最大366日）のワークアウトセッション履歴を取得する。"""
         return await health_service.get_exercise_history(start_date, end_date)
 
     mcp.custom_route(OAUTH_LOGIN_PATH, methods=["GET", "POST"])(
