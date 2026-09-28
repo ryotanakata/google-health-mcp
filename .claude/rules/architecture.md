@@ -40,7 +40,7 @@ paths:
 | モジュール | 責務 | 置かないもの |
 |---|---|---|
 | `main.py` | MCPサーバーの組み立て、`@mcp.tool()` の定義、ASGIアプリ生成 | 要約ロジック、HTTP呼び出し |
-| `service.py` | ツール入力の検証（日付形式・期間の前後）と、生データの要約 | HTTP呼び出し、APIのパス・filter文字列 |
+| `service.py` | ツール入力の検証（日付形式・期間の前後・期間の上限）と、生データの要約 | HTTP呼び出し、APIのパス・filter文字列 |
 | `repository.py` | Google Health API の呼び出し、ページング、クエリ期間上限による分割・結合 | 要約・整形 |
 | `google_auth.py` | Google の refresh_token から access_token を取得・更新（Googleに対するOAuthクライアント側） | Claude向けの認証 |
 | `claude_auth.py` | Claude向けOAuth 2.1認可サーバー（同意画面・トークン発行） | Google向けの認証 |
