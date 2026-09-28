@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from src.constants import EXERCISE_HISTORY_MAX_DAYS
 from src.models import (
     DailyActivity,
     ExerciseHistory,
@@ -33,6 +34,11 @@ class HealthService:
         start, end = self.parse_date(start_date), self.parse_date(end_date)
         if start > end:
             raise ValueError("start_date には end_date 以前の日付を指定してください")
+        if (end - start).days + 1 > EXERCISE_HISTORY_MAX_DAYS:
+            raise ValueError(
+                f"期間は {EXERCISE_HISTORY_MAX_DAYS} 日以内で指定してください。"
+                "それより長い期間は分けて呼び出してください"
+            )
         points = await self._repository.fetch_exercises(start, end)
         sessions = sorted(
             (self.summarize_exercise(point.get("exercise", {})) for point in points),
