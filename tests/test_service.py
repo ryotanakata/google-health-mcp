@@ -170,6 +170,6 @@ async def test_invalid_date_is_rejected():
 
 async def test_reversed_range_is_rejected():
     repository = FakeRepository()
-    with pytest.raises(ValueError, match="start_date"):
+    with pytest.raises(ValueError, match="^start_date には end_date 以前の日付を指定してください$"):
         await HealthService(repository).get_exercise_history("2026-02-01", "2026-01-01")
     assert repository.calls == []
