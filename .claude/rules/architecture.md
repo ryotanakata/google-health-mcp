@@ -17,7 +17,7 @@ paths:
 | MCP サーバー（本リポジトリ） | Claude 向けの OAuth 認可サーバー兼 MCP サーバー。Google Health API を呼んで要約を返す | Cloud Run |
 | Google OAuth | Google Health API 用の access_token を refresh_token から発行する | Google |
 | Google Health API v4 | Google Fitbit Air（主な対象）と Fitbit / Pixel Watch の健康データ | Google |
-| Secret Manager | `MCP_SHARED_SECRET`・`GOOGLE_CLIENT_SECRET`・`GOOGLE_REFRESH_TOKEN` | GCP |
+| Secret Manager | `MCP_SHARED_SECRET`・`MCP_TOKEN_SIGNING_KEY`・`GOOGLE_CLIENT_SECRET`・`GOOGLE_REFRESH_TOKEN` | GCP |
 
 ## システムの不変条件
 
@@ -55,7 +55,7 @@ paths:
 
 - 依存は `main → service → repository → google_auth` の一方向にする。逆向きの import は禁止
 - `claude_auth` は `main` からのみ使う
-- `config` / `constants` / `models` はどこから import してもよい（これらは他の `src` モジュールを import しない）
+- `config` / `constants` / `models` はどこから import してもよい（これらは他の `src` モジュールを import しない。ただし `config` は検証に使う上限値のため `constants` を import してよい）
 
 ## クラスと関数
 

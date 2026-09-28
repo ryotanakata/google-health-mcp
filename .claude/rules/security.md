@@ -12,7 +12,7 @@ paths:
 
 ## 秘密情報
 
-- `MCP_SHARED_SECRET`・`GOOGLE_CLIENT_SECRET`・`GOOGLE_REFRESH_TOKEN`・アクセストークン・パスフレーズをログ・例外メッセージ・レスポンスに含めない
+- `MCP_SHARED_SECRET`・`MCP_TOKEN_SIGNING_KEY`・`GOOGLE_CLIENT_SECRET`・`GOOGLE_REFRESH_TOKEN`・アクセストークン・パスフレーズをログ・例外メッセージ・レスポンスに含めない
 - 例外: `auth_setup.py` が取得した refresh_token を標準出力に表示するのは意図した動作（利用者が Secret Manager に登録するため）。サーバーのコードでは表示しない
 - 秘密情報をコード・テストの fixture 以外に直書きしない。`.env` をコミットしない（`.env.example` には空欄かダミー値のみ）
 - 秘密情報やトークンを URL のクエリ文字列で受け取らない・渡さない
@@ -31,6 +31,7 @@ if not hmac.compare_digest(passphrase, self._passphrase): ...
 ## Claude向けOAuth（`claude_auth.py`）
 
 - クライアント登録で受け付ける redirect_uri は `CLAUDE_CALLBACK_URL` と http のループバック（`OAUTH_LOOPBACK_HOSTS`）のみ。許可リストを広げる変更は人間の確認なしに行わない
+- JWT の署名鍵は `MCP_TOKEN_SIGNING_KEY` から導出する。パスフレーズ（`MCP_SHARED_SECRET`）から導出しない（署名済みの client_id は誰でも入手でき、オフライン総当たりの材料になるため）
 - 認可コード・トークン・クライアント情報は署名付きJWTで発行し、検証では `typ`（用途）と `iss` を必ず確認する。用途の違うトークンを受け入れない（例: refresh トークンをアクセストークンとして通さない）
 - パスフレーズ誤りには `OAUTH_FAILED_LOGIN_DELAY_SECONDS` の待ちを入れる
 - 同意画面の HTML に差し込む値はすべて `html.escape` する。エスケープせずに差し込むのは禁止

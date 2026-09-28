@@ -56,7 +56,8 @@ python -m src.main                                       # http://localhost:8080
 | 変数 | 説明 |
 | --- | --- |
 | `PUBLIC_BASE_URL` | サーバーの公開オリジン |
-| `MCP_SHARED_SECRET` | 同意画面のパスフレーズ（長いランダム値。変更すると全トークンが無効になる） |
+| `MCP_SHARED_SECRET` | 同意画面のパスフレーズ（長いランダム値） |
+| `MCP_TOKEN_SIGNING_KEY` | トークンの署名鍵（32文字以上のランダム値。パスフレーズとは別の値にする。変更すると全トークンが無効になる） |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | GCP の OAuth クライアント |
 | `GOOGLE_REFRESH_TOKEN` | `auth_setup.py` の出力 |
 
