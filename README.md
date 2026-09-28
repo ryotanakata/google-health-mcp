@@ -56,7 +56,8 @@ python -m src.main                                       # http://localhost:8080
 | Variable | Description |
 | --- | --- |
 | `PUBLIC_BASE_URL` | Public origin of the server |
-| `MCP_SHARED_SECRET` | Consent screen passphrase (long random value; changing it revokes all tokens) |
+| `MCP_SHARED_SECRET` | Consent screen passphrase (long random value) |
+| `MCP_TOKEN_SIGNING_KEY` | Token signing key (random value of 32+ characters, different from the passphrase; changing it revokes all tokens) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | GCP OAuth client |
 | `GOOGLE_REFRESH_TOKEN` | Output of `auth_setup.py` |
 

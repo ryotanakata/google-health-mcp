@@ -35,6 +35,7 @@ def app():
         port=8080,
         public_base_url=PUBLIC_BASE_URL,
         mcp_shared_secret=PASSPHRASE,
+        mcp_token_signing_key="test-signing-key-0123456789abcdef",
         google_client_id="id",
         google_client_secret="secret",
         google_refresh_token="token",

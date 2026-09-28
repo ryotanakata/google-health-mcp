@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from mcp.shared.auth import OAuthClientInformationFull
+
 from src.claude_auth import ClaudeOAuthProvider
 
 MALICIOUS = '"><script>alert(1)</script>'
@@ -34,3 +36,20 @@ def test_is_allowed_redirect_uri():
     assert ClaudeOAuthProvider.is_allowed_redirect_uri("http://127.0.0.1:50000/callback")
     assert not ClaudeOAuthProvider.is_allowed_redirect_uri("https://evil.example/callback")
     assert not ClaudeOAuthProvider.is_allowed_redirect_uri("https://localhost/callback")
+
+
+async def test_signing_key_is_independent_of_passphrase():
+    issuer = "https://mcp.example.test"
+    provider = ClaudeOAuthProvider("passphrase", "signing-key-a" * 3, issuer)
+    client_info = OAuthClientInformationFull(
+        client_id="sdk-assigned",
+        redirect_uris=["https://claude.ai/api/mcp/auth_callback"],
+        token_endpoint_auth_method="none",
+    )
+    await provider.register_client(client_info)
+
+    same_key = ClaudeOAuthProvider("other-passphrase", "signing-key-a" * 3, issuer)
+    same_passphrase = ClaudeOAuthProvider("passphrase", "signing-key-b" * 3, issuer)
+
+    assert await same_key.get_client(client_info.client_id) is not None
+    assert await same_passphrase.get_client(client_info.client_id) is None
