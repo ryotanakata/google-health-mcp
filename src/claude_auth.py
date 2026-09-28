@@ -4,10 +4,12 @@
 - 利用者は本人1人。同意画面で MCP_SHARED_SECRET をパスフレーズとして入力できた人にだけ
   トークンを発行する
 - Cloud Run はインスタンスの再起動・複数起動があるため、クライアント登録情報・認可コード・
-  トークンはすべて MCP_SHARED_SECRET から導出した鍵で署名した JWT とし、サーバー側に
+  トークンはすべて MCP_TOKEN_SIGNING_KEY から導出した鍵で署名した JWT とし、サーバー側に
   状態を持たない（DB 不要）
+- 署名鍵をパスフレーズから導出しない。署名済みの client_id は誰でも登録で入手できるため、
+  人が入力できる程度のパスフレーズを鍵にすると、オフラインの総当たりで鍵が割れる
 - ステートレスの代償として、発行済みトークンを個別に失効させることはできない。
-  全トークンを無効にしたいときは MCP_SHARED_SECRET を変更する
+  全トークンを無効にしたいときは MCP_TOKEN_SIGNING_KEY を変更する
 """
 
 from __future__ import annotations
@@ -62,10 +64,10 @@ from src.constants import (
 class ClaudeOAuthProvider:
     """mcp.server.auth.provider.OAuthAuthorizationServerProvider を継承せずに満たす実装。"""
 
-    def __init__(self, shared_secret: str, issuer_url: str) -> None:
+    def __init__(self, shared_secret: str, signing_key: str, issuer_url: str) -> None:
         self._passphrase = shared_secret.encode()
         self._signing_key = hmac.new(
-            self._passphrase, b"google-health-mcp/oauth-signing", hashlib.sha256
+            signing_key.encode(), b"google-health-mcp/oauth-signing", hashlib.sha256
         ).digest()
         self._issuer = issuer_url.rstrip("/")
         # 認可コードの再利用防止。インスタンスをまたぐと効かないが、PKCE と5分の有効期限で補う

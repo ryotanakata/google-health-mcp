@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# --- 環境変数の検証（config.py） ---
+
+# トークン署名鍵の最短長。署名済みの client_id は誰でも登録で入手でき、鍵をオフラインで
+# 総当たりする材料になるため、推測できない長さを強制する（openssl rand -hex 32 で64文字）
+OAUTH_SIGNING_KEY_MIN_LENGTH = 32
+
 # --- MCP サーバー（main.py） ---
 
 MCP_PATH = "/mcp"

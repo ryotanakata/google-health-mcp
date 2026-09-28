@@ -20,7 +20,7 @@ from src.service import HealthService
 def create_app(settings: Settings) -> Starlette:
     health_service = HealthService(HealthRepository(GoogleAuthManager(settings)))
     claude_oauth_provider = ClaudeOAuthProvider(
-        settings.mcp_shared_secret, settings.public_base_url
+        settings.mcp_shared_secret, settings.mcp_token_signing_key, settings.public_base_url
     )
 
     mcp = MCPServer(
