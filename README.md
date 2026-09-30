@@ -83,7 +83,17 @@ ruff check .
 pytest
 ```
 
-Coding conventions live in `.claude/rules/`. Commits pass a rules review first (`rules-review` skill).
+Tasks are written in Notion, implemented by Claude Code, and merged by a human. The setup lives in `.claude/`:
+
+```mermaid
+flowchart LR
+    N["Notion task<br/>(background, requirements, AC)"] --> C["Claude Code<br/>implement, self-review, open PR"]
+    C --> H["Human review<br/>and merge"] --> D["CI, then deploy<br/>to Cloud Run"]
+```
+
+- `rules/`: coding conventions. The `rules-review` skill checks changed files against them, and a hook (`hooks/review-gate.sh`) blocks commits that have not passed
+- `routine-prompt.md`: prompt for a scheduled routine. Each run handles one item: CI failures or review comments on its open PRs first, otherwise a new task from the Notion database in `notion.json`
+- `skills/ship/`: review, commit, and open a PR in one step
 
 ## License
 

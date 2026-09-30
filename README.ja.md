@@ -83,7 +83,17 @@ ruff check .
 pytest
 ```
 
-コーディング規約は `.claude/rules/` にある。コミット前に規約レビュー（`rules-review` スキル）を通す。
+タスクを Notion に書き、Claude Code が実装し、人がレビューしてマージする。仕組みは `.claude/` にある:
+
+```mermaid
+flowchart LR
+    N["Notion のタスク<br/>（背景・要求・AC）"] --> C["Claude Code<br/>実装・セルフレビュー・PR 作成"]
+    C --> H["人がレビュー<br/>してマージ"] --> D["CI のあと<br/>Cloud Run へデプロイ"]
+```
+
+- `rules/`: コーディング規約。`rules-review` スキルが変更ファイルを照合し、通過していないコミットはフック（`hooks/review-gate.sh`）が止める
+- `routine-prompt.md`: 定期実行のルーチン用プロンプト。1回に1件、自分の PR の CI 失敗・レビューコメントへの対応を優先し、無ければ `notion.json` の Notion データベースから新しいタスクを取る
+- `skills/ship/`: レビュー・コミット・PR 作成を一括で行う
 
 ## ライセンス
 
