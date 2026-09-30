@@ -21,6 +21,8 @@ GOOGLE_HEALTH_SCOPES = [
     "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
     "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
 ]
+# auth_setup.py --token-only で、ブラウザでの許可を待つ上限
+GOOGLE_REAUTH_TIMEOUT_SECONDS = 10 * 60
 
 # --- ツール入力の検証（service.py） ---
 

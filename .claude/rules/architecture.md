@@ -23,17 +23,17 @@ paths:
 
 - **利用者は本人1人**。複数ユーザー・テナント分離の仕組みを持ち込まない
 - **サーバーは状態を持たない**。DB・ファイル・インスタンスのメモリに、再起動後も必要な状態を保存しない（Cloud Run はスケールゼロと複数インスタンスがある）。必要な状態は署名付きトークンに載せる
-- **Google の refresh_token は初回のみローカルで取得する**（`auth_setup.py`）。ブラウザの同意画面が必要なため、サーバー上で取得する経路を作らない
+- **Google の refresh_token はローカルでのみ取得する**（`auth_setup.py`）。ブラウザの同意画面が必要なため、サーバー上で取得する経路を作らない。同意画面が「テスト」のままだと7日で失効するので、`scripts/refresh_google_token.sh` で取り直す
 - **生の時系列データを Claude に返さない**。MCP サーバー側で要約してから返す（コンテキストトークン節約のため）
-- **リクエストの処理中以外に CPU を使わない**。常駐する接続・バックグラウンド処理・定期実行を入れない（Cloud Run の「CPU はリクエスト処理中のみ割り当て」で無料枠内に収めるため）
+- **サーバーはリクエストの処理中以外に CPU を使わない**。サーバーに常駐する接続・バックグラウンド処理・定期実行を入れない（利用者の PC で動く `scripts/` の定期実行は対象外。Cloud Run の「CPU はリクエスト処理中のみ割り当て」で無料枠内に収めるため）
 - **読み取り専用**。Google Health API への書き込み（`create` / `patch` / `batchDelete`）を実装しない
 
 ## 処理の流れ
 
-- **初回認可（ローカル・1回だけ）**: `auth_setup.py` → Google 同意画面 → refresh_token を Secret Manager に登録
+- **Google の認可（ローカル）**: `auth_setup.py` → Google 同意画面 → refresh_token を Secret Manager に登録。同意画面が「テスト」の間は `scripts/refresh_google_token.sh` で5日ごとに取り直す
 - **コネクタ接続（Claude 側で1回）**: Claude が `/register` で動的クライアント登録 → `/authorize` → 同意画面（`/oauth/login`）でパスフレーズ入力 → `/token` でトークン取得
 - **ツール呼び出し（定常）**: Claude → `/mcp`（OAuth トークン検証）→ `service`（入力検証）→ `repository`（Google Health API 呼び出し。access_token が期限切れなら `google_auth` が refresh_token で再発行）→ `service`（要約）→ Claude
-- refresh_token 自体が失効していた場合は `RefreshTokenExpiredError` を返し、`auth_setup.py` の再実行を利用者に促す（自動復旧しない）
+- refresh_token 自体が失効していた場合は `RefreshTokenExpiredError` を返し、`auth_setup.py` の再実行（`scripts/refresh_google_token.sh`）を利用者に促す（サーバーは自動復旧しない）
 
 ## モジュールの責務
 

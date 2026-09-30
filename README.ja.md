@@ -68,6 +68,16 @@ python -m src.main                                       # http://localhost:8080
 3. Cloud Run にデプロイし、発行された URL を `PUBLIC_BASE_URL` に設定して再デプロイする
 4. Claude の Settings → Connectors → Add custom connector に `https://<サービス>.run.app/mcp` を登録し、同意画面でパスフレーズを入力する
 
+### Google のトークンの更新（同意画面が「テスト」のとき）
+
+OAuth 同意画面の公開ステータスが「テスト」のままだと、Google の refresh_token は発行から7日で失効する。`scripts/refresh_google_token.sh` は、Secret Manager の最新のトークンが発行から5日経っていればブラウザを開いて再認可し（「許可」を押すのは人）、新しいトークンの登録・Cloud Run への反映・古い版の破棄までを行う。
+
+```bash
+scripts/refresh_google_token.sh           # 発行から5日以上なら更新する
+scripts/refresh_google_token.sh --force   # 今すぐ更新する
+scripts/install_refresh_schedule.sh       # macOS: launchd で毎日21時に確認する
+```
+
 ## 開発
 
 ```bash

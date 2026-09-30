@@ -9,7 +9,8 @@ pip install -r requirements-dev.txt   # 開発依存を含めてインストー�
 ruff check .                           # lint
 pytest                                 # テスト
 python -m src.main                     # ローカルでサーバー起動（要 .env）
-python auth_setup.py --client-secret client_secret.json  # 初回のみ・ローカルでrefresh_token取得
+python auth_setup.py --client-secret client_secret.json  # ローカルでrefresh_token取得
+scripts/refresh_google_token.sh        # refresh_tokenの更新（同意画面が「テスト」のとき5日ごと）
 ```
 
 ## 構成
