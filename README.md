@@ -50,6 +50,8 @@ Dates are `YYYY-MM-DD`; ranges include both ends and are limited to 366 days.
 
 ## Quick Start
 
+First create an OAuth client and get `client_secret.json` (steps 1–2 of [docs/deployment.md](docs/deployment.md)).
+
 ```bash
 pip install -r requirements-dev.txt
 cp .env.example .env                                     # fill in the values

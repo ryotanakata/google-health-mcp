@@ -50,6 +50,8 @@ flowchart LR
 
 ## クイックスタート
 
+先に OAuth クライアントを作り、`client_secret.json` を用意する（[docs/deployment.ja.md](docs/deployment.ja.md) の手順1〜2）。
+
 ```bash
 pip install -r requirements-dev.txt
 cp .env.example .env                                     # 値を設定する
