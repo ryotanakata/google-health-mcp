@@ -13,6 +13,8 @@
 
 Claude に「昨日の睡眠はどうだった？」と聞くと、このサーバーが Google Health API からデータを取り、要約して返す。Fitbit・Pixel Watch のデータも同じように扱える。
 
+![Claude から google-health-mcp を使っている画面](docs/screenshot.png)
+
 ## 構成
 
 ```mermaid

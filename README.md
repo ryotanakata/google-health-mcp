@@ -13,6 +13,8 @@
 
 Ask Claude "How did I sleep last night?" and this server fetches the data from the Google Health API, summarizes it, and returns it. Fitbit and Pixel Watch data works too.
 
+![Claude using google-health-mcp](docs/screenshot.png)
+
 ## Architecture
 
 ```mermaid
