@@ -68,6 +68,16 @@ python -m src.main                                       # http://localhost:8080
 3. Deploy to Cloud Run, then set the issued URL as `PUBLIC_BASE_URL` and deploy again
 4. In Claude: Settings → Connectors → Add custom connector → `https://<your-service>.run.app/mcp`, then enter the passphrase on the consent screen
 
+### Renewing the Google token (consent screen in Testing)
+
+While the OAuth consent screen stays in **Testing**, Google revokes the refresh token 7 days after it is issued. `scripts/refresh_google_token.sh` renews it once the latest token in Secret Manager is 5 days old: it opens the browser for you to click Allow, stores the new token, updates Cloud Run, and destroys the old versions.
+
+```bash
+scripts/refresh_google_token.sh           # renew if the token is 5+ days old
+scripts/refresh_google_token.sh --force   # renew now
+scripts/install_refresh_schedule.sh       # macOS: check daily at 21:00 with launchd
+```
+
 ## Development
 
 ```bash
