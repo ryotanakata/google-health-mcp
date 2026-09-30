@@ -1,5 +1,7 @@
 # google-health-mcp
 
+![Claude answering "How did I sleep last night?" in English and Japanese with a sleep stage chart and summary](docs/screenshot.png)
+
 **A remote MCP server that lets Claude read your Google Fitbit Air health data through the Google Health API.**
 
 [![CI](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml)
@@ -12,8 +14,6 @@
 ---
 
 Ask Claude "How did I sleep last night?" and this server fetches the data from the Google Health API, summarizes it, and returns it. Fitbit and Pixel Watch data works too.
-
-![Claude using google-health-mcp](docs/screenshot.png)
 
 ## Architecture
 

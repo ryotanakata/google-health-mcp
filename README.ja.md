@@ -1,5 +1,7 @@
 # google-health-mcp
 
+![Claude が「昨夜の睡眠」の質問に、睡眠ステージのグラフと要約で答えている画面（英語・日本語）](docs/screenshot.png)
+
 **Google Fitbit Air の健康データを、Google Health API 経由で Claude から呼び出すリモート MCP サーバー。**
 
 [![CI](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml)
@@ -12,8 +14,6 @@
 ---
 
 Claude に「昨日の睡眠はどうだった？」と聞くと、このサーバーが Google Health API からデータを取り、要約して返す。Fitbit・Pixel Watch のデータも同じように扱える。
-
-![Claude から google-health-mcp を使っている画面](docs/screenshot.png)
 
 ## 構成
 
