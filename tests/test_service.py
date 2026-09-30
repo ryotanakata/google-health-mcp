@@ -188,6 +188,20 @@ def test_summarize_exercise():
     assert result["distance_km"] == 1.5
 
 
+def test_summarize_exercise_treats_missing_active_zone_minutes_as_zero_with_heart_rate():
+    result = HealthService.summarize_exercise(
+        {"metricsSummary": {"averageHeartRateBeatsPerMinute": "82", "steps": "2588"}}
+    )
+    assert result["active_zone_minutes"] == 0
+
+
+def test_summarize_exercise_keeps_active_zone_minutes_none_without_heart_rate():
+    result = HealthService.summarize_exercise({"metricsSummary": {"caloriesKcal": 90.0}})
+    assert result["active_zone_minutes"] is None
+    assert result["steps"] is None
+    assert result["distance_km"] is None
+
+
 def test_summarize_exercise_uses_utc_time_and_negative_offset_without_civil_time():
     result = HealthService.summarize_exercise(
         {

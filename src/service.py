@@ -135,6 +135,12 @@ class HealthService:
         interval = exercise.get("interval", {})
         distance_mm = metrics.get("distanceMillimeters")
         calories = metrics.get("caloriesKcal")
+        average_heart_rate = HealthService._to_int(metrics.get("averageHeartRateBeatsPerMinute"))
+        # proto3 JSON は値0のフィールドを省略する。アクティブゾーン分数は心拍から算出されるので、
+        # 心拍があるのに欠けていれば0分、心拍もなければ未計測として None にする
+        active_zone_minutes = HealthService._to_int(metrics.get("activeZoneMinutes"))
+        if active_zone_minutes is None and average_heart_rate is not None:
+            active_zone_minutes = 0
         return {
             "name": exercise.get("displayName"),
             "type": exercise.get("exerciseType"),
@@ -142,12 +148,10 @@ class HealthService:
             "end": HealthService._local_datetime(interval, "end"),
             "active_minutes": HealthService._duration_minutes(exercise.get("activeDuration")),
             "calories_kcal": round(calories) if calories is not None else None,
-            "average_heart_rate": HealthService._to_int(
-                metrics.get("averageHeartRateBeatsPerMinute")
-            ),
+            "average_heart_rate": average_heart_rate,
             "distance_km": round(distance_mm / 1_000_000, 2) if distance_mm is not None else None,
             "steps": HealthService._to_int(metrics.get("steps")),
-            "active_zone_minutes": HealthService._to_int(metrics.get("activeZoneMinutes")),
+            "active_zone_minutes": active_zone_minutes,
         }
 
     @staticmethod
