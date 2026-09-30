@@ -1,0 +1,72 @@
+name: Deploy
+
+# main の CI（lint・テスト）が成功したら Cloud Run に新しいイメージを出す。
+# 環境変数・シークレット・実行アカウントは既存のサービスの設定を引き継ぐので、ここには持たない。
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # リポジトリ変数が未設定（フォーク等）ならデプロイしない。workflow_run の branches は
+    # 実行元のブランチ名しか見ないため、フォークの PR（ブランチ名 main）で動かないよう
+    # このリポジトリへの push であることも確かめる
+    if: >-
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    # GitHub の Environment で main からのデプロイだけを許可し、必要なら承認を挟む
+    # （README の「継続的デプロイ」）
+    environment: production
+    permissions:
+      contents: read
+      # Workload Identity Federation で GCP の短期トークンを得るため（鍵ファイルは使わない）
+      id-token: write
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
+      SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'google-health-mcp' }}
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # workflow_run では CI が検証したコミットを明示して取る
+          ref: ${{ env.COMMIT }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        id: image
+        run: |
+          image="${REGION}-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/${SERVICE}:${COMMIT}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -t "$image" .
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          gcloud run deploy "$SERVICE" --image "$IMAGE" \
+            --project "$PROJECT_ID" --region "$REGION" --quiet

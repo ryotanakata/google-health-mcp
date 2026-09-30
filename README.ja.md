@@ -84,7 +84,50 @@ python -m src.main                                       # http://localhost:8080
    `--allow-unauthenticated` は URL に到達できるようにするだけで、`/mcp` は OAuth で保護される。起動すると `curl <URL>/.well-known/oauth-authorization-server` が JSON を返す
 5. Claude の Settings → Connectors → Add custom connector に `<URL>/mcp` を登録し、同意画面でパスフレーズを入力する
 
-コードを更新したときは、`--source . --region asia-northeast1` だけを付けて同じ `gcloud run deploy` を実行する。環境変数とシークレットは引き継がれる。
+手動でコードを更新するときは、`--source . --region asia-northeast1` だけを付けて同じ `gcloud run deploy` を実行する。環境変数とシークレットは引き継がれる。マージのたびに自動でデプロイするなら、次の継続的デプロイを設定する。
+
+### 継続的デプロイ（main へのマージ）
+
+初回のデプロイ後は、`main` へのマージごとに `.github/workflows/deploy.yml` がデプロイする。CI（lint・テスト）が通ると GitHub Actions がイメージをビルドして Artifact Registry に push し、Cloud Run に新しいリビジョンを出す。環境変数とシークレットはサービスに設定済みのものを引き継ぐ。GitHub は Workload Identity Federation で認証するので鍵ファイルは置かない。初回だけ次を設定する:
+
+```bash
+PROJECT_ID=<プロジェクトID>
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+REPO=<オーナー>/<リポジトリ>
+SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
+
+gcloud services enable iamcredentials.googleapis.com
+gcloud iam service-accounts create github-deployer
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA --role=roles/run.developer
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA --role=roles/artifactregistry.writer
+gcloud iam service-accounts add-iam-policy-binding $PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+  --member=serviceAccount:$SA --role=roles/iam.serviceAccountUser
+
+gcloud iam workload-identity-pools create github --location=global
+gcloud iam workload-identity-pools providers create-oidc github --location=global \
+  --workload-identity-pool=github --issuer-uri=https://token.actions.githubusercontent.com \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main'"
+gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+```
+
+続けて GitHub 側を設定する:
+
+1. Settings → Environments → New environment で `production` を作り、Deployment branches and tags で `main` だけを許可する。デプロイのたびに承認を挟みたいなら、Required reviewers に自分を追加する
+2. Settings → Branches（または Rules）で `main` を保護し、マージ前に PR と `CI` のステータスチェックを必須にする
+3. リポジトリ変数（Settings → Secrets and variables → Actions → Variables）を登録する。どれも秘密情報ではない。`GCP_WORKLOAD_IDENTITY_PROVIDER` が未設定の間はデプロイのジョブを飛ばす
+
+Google Cloud はこのリポジトリの `main` のトークンだけを受け付け、GitHub は `main` にしか `production` 環境を使わせない。
+
+| 変数 | 値 |
+| --- | --- |
+| `GCP_PROJECT_ID` | プロジェクト ID |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/<プロジェクト番号>/locations/global/workloadIdentityPools/github/providers/github` |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | `github-deployer@<プロジェクトID>.iam.gserviceaccount.com` |
+| `GCP_REGION` / `CLOUD_RUN_SERVICE` | 任意。省略時は `asia-northeast1` / `google-health-mcp` |
+
+マージせずにデプロイしたいときは、`main` で Deploy ワークフローを手動実行する（Actions → Deploy → Run workflow）。
 
 ### Google のトークンの更新（同意画面が「テスト」のとき）
 
