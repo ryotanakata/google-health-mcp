@@ -32,7 +32,7 @@ flowchart LR
 | --- | --- | --- |
 | `get_daily_activity` | `date` | Steps, calories, distance, active minutes |
 | `get_sleep_log` | `date` | Sleep that ended that morning: duration, efficiency, stages, naps |
-| `get_heart_rate_summary` | `date` | Resting heart rate, time in heart rate zones |
+| `get_heart_rate_summary` | `date` | Resting heart rate, minutes in the moderate / vigorous / peak zones and their total |
 | `get_exercise_history` | `start_date`, `end_date` | Workouts: type, time, calories, average heart rate, distance |
 
 Dates are `YYYY-MM-DD`; ranges include both ends and are limited to 366 days.
@@ -41,6 +41,7 @@ Dates are `YYYY-MM-DD`; ranges include both ends and are limited to 366 days.
 
 - One request covers up to 90 days (14 days for multi-day heart rate and calorie aggregates). Longer ranges are split and merged
 - Results are paged (25 per page for workouts and sleep) and fetched to the end
+- The light heart rate zone is not returned: the daily rollup assigns every minute of the day to a zone, so light also holds sleep, rest, and time the device was not worn
 - Google's own scores (Sleep Score, Daily Readiness) are not available through the API
 - Sleep and workout start/end times are in the local time zone recorded with each session
 - Tested with a real Google Fitbit Air account. Google Health Premium is not assumed, but whether every data type is available without it has not been checked

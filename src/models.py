@@ -34,7 +34,9 @@ class SleepLog(TypedDict):
 class HeartRateSummary(TypedDict):
     date: str
     resting_heart_rate: int | None
+    # moderate / vigorous / peak のみ。light は1日の残り時間なので含めない
     heart_rate_zone_minutes: dict[str, int]
+    elevated_heart_rate_minutes: int
 
 
 class ExerciseSession(TypedDict):
