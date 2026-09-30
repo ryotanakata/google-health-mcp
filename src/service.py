@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 
 from src.constants import EXERCISE_HISTORY_MAX_DAYS
 from src.models import (
@@ -94,8 +95,8 @@ class HealthService:
         in_period = int(summary.get("minutesInSleepPeriod", 0))
         interval = main.get("interval", {})
         main_sleep: MainSleep = {
-            "start": HealthService._format_civil_datetime(interval.get("civilStartTime")),
-            "end": HealthService._format_civil_datetime(interval.get("civilEndTime")),
+            "start": HealthService._local_datetime(interval, "start"),
+            "end": HealthService._local_datetime(interval, "end"),
             "minutes_asleep": asleep,
             "minutes_in_sleep_period": in_period,
             # API は睡眠効率を返さないため、Fitbit と同じく「睡眠時間 / 就床時間」で算出する
@@ -136,8 +137,8 @@ class HealthService:
         return {
             "name": exercise.get("displayName"),
             "type": exercise.get("exerciseType"),
-            "start": HealthService._format_civil_datetime(interval.get("civilStartTime")),
-            "end": HealthService._format_civil_datetime(interval.get("civilEndTime")),
+            "start": HealthService._local_datetime(interval, "start"),
+            "end": HealthService._local_datetime(interval, "end"),
             "active_minutes": HealthService._duration_minutes(exercise.get("activeDuration")),
             "calories_kcal": round(calories) if calories is not None else None,
             "average_heart_rate": HealthService._to_int(
@@ -162,6 +163,27 @@ class HealthService:
         if not value:
             return None
         return round(float(value.rstrip("s")) / 60)
+
+    @staticmethod
+    def _local_datetime(interval: dict, edge: Literal["start", "end"]) -> str | None:
+        """SessionTimeInterval の開始・終了を現地時刻の "YYYY-MM-DDTHH:MM" で返す。
+
+        ディスカバリドキュメント上 civilStartTime / civilEndTime は Output only で、実際の list
+        の応答には含まれない。必須の startTime / endTime（UTC）と startUtcOffset / endUtcOffset
+        から現地時刻を算出し、civil 側が返ってきたときはそちらを使う。
+        """
+        civil = HealthService._format_civil_datetime(interval.get(f"civil{edge.title()}Time"))
+        if civil is not None:
+            return civil
+        timestamp = interval.get(f"{edge}Time")
+        if not timestamp:
+            return None
+        # Timestamp の JSON 表現は常に Z（UTC）で、秒の小数部は0〜9桁。分までしか使わないので
+        # 秒までを切り出して解釈する
+        utc = dt.datetime.strptime(timestamp[:19], "%Y-%m-%dT%H:%M:%S")
+        offset = interval.get(f"{edge}UtcOffset") or "0s"
+        local = utc + dt.timedelta(seconds=float(offset.rstrip("s")))
+        return local.strftime("%Y-%m-%dT%H:%M")
 
     @staticmethod
     def _format_civil_datetime(civil: dict | None) -> str | None:

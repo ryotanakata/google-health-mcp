@@ -95,6 +95,26 @@ def test_summarize_sleep_picks_main_sleep_and_computes_efficiency():
     assert main["stages_minutes"] == {"deep": 60, "rem": 90}
 
 
+def test_summarize_sleep_uses_utc_time_and_offset_without_civil_time():
+    points = [
+        {
+            "sleep": {
+                "interval": {
+                    "startTime": "2026-09-29T15:30:00Z",
+                    "startUtcOffset": "32400s",
+                    "endTime": "2026-09-29T21:05:30.123456789Z",
+                    "endUtcOffset": "32400s",
+                },
+                "summary": {"minutesAsleep": "261", "minutesInSleepPeriod": "277"},
+                "metadata": {"mainSleep": True},
+            }
+        }
+    ]
+    main = HealthService.summarize_sleep("2026-09-30", points)["main_sleep"]
+    assert main["start"] == "2026-09-30T00:30"
+    assert main["end"] == "2026-09-30T06:05"
+
+
 def test_summarize_sleep_without_sessions():
     result = HealthService.summarize_sleep("2026-01-02", [])
     assert result["main_sleep"] is None
@@ -139,6 +159,56 @@ def test_summarize_exercise():
     assert result["calories_kcal"] == 513
     assert result["average_heart_rate"] == 148
     assert result["distance_km"] == 1.5
+
+
+def test_summarize_exercise_uses_utc_time_and_negative_offset_without_civil_time():
+    result = HealthService.summarize_exercise(
+        {
+            "interval": {
+                "startTime": "2026-01-05T02:30:00Z",
+                "startUtcOffset": "-25200s",
+                "endTime": "2026-01-05T03:15:00Z",
+                "endUtcOffset": "-25200s",
+            }
+        }
+    )
+    assert result["start"] == "2026-01-04T19:30"
+    assert result["end"] == "2026-01-04T20:15"
+
+
+def test_summarize_exercise_prefers_civil_time_over_utc_time():
+    result = HealthService.summarize_exercise(
+        {
+            "interval": {
+                "civilStartTime": _civil(2026, 1, 5, hours=7, minutes=30),
+                "startTime": "2026-01-04T22:30:00Z",
+                "startUtcOffset": "0s",
+            }
+        }
+    )
+    assert result["start"] == "2026-01-05T07:30"
+    assert result["end"] is None
+
+
+async def test_get_exercise_history_sorts_sessions_without_civil_time():
+    def exercise(name: str, start_time: str) -> dict:
+        return {
+            "exercise": {
+                "displayName": name,
+                "interval": {"startTime": start_time, "startUtcOffset": "32400s"},
+            }
+        }
+
+    repository = FakeRepository(
+        exercises=[
+            exercise("later", "2026-09-20T10:00:00Z"),
+            exercise("earlier", "2026-09-18T10:00:00Z"),
+        ]
+    )
+    result = await HealthService(repository).get_exercise_history("2026-09-16", "2026-09-30")
+
+    assert [s["name"] for s in result["sessions"]] == ["earlier", "later"]
+    assert result["sessions"][0]["start"] == "2026-09-18T19:00"
 
 
 async def test_get_daily_activity_parses_date_and_summarizes():
