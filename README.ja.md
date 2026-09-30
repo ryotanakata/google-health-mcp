@@ -42,7 +42,8 @@ flowchart LR
 - 1リクエストの期間は最大90日（心拍・カロリーの複数日集計は14日）。長い期間は分割して取得・結合する
 - 結果はページ単位（ワークアウト・睡眠は1ページ25件）で、最後まで取得する
 - Google 独自のスコア（睡眠スコア、Daily Readiness）は API では取得できない
-- Google Health Premium の契約は前提にしていない。契約なしでの取得は実機で未確認
+- 睡眠・ワークアウトの開始・終了時刻は、各セッションに記録された現地時刻で返す
+- 実機（Google Fitbit Air のアカウント）で動作を確認済み。Google Health Premium の契約は前提にしていないが、契約なしで全データ型を取得できるかは未確認
 
 ## クイックスタート
 
@@ -63,10 +64,26 @@ python -m src.main                                       # http://localhost:8080
 
 ## デプロイ
 
-1. Google Cloud で Google Health API を有効化し、読み取り専用スコープで OAuth 同意画面を設定して `client_secret.json` を取得する
-2. ローカルで `auth_setup.py` を実行し、秘密情報を Secret Manager に登録する
-3. Cloud Run にデプロイし、発行された URL を `PUBLIC_BASE_URL` に設定して再デプロイする
-4. Claude の Settings → Connectors → Add custom connector に `https://<サービス>.run.app/mcp` を登録し、同意画面でパスフレーズを入力する
+1. Google Cloud で Google Health API を有効化する。OAuth 同意画面（ユーザーの種類は**外部**）に `GOOGLE_HEALTH_SCOPES` の読み取り専用スコープ3つを追加し、公開ステータスは**「テスト」のまま**にして、自分の Google アカウントをテストユーザーに登録する。Google の審査や Web サイトは不要だが、refresh_token は7日で失効する（後述）
+2. 種類が**「デスクトップアプリ」**の OAuth クライアントを作り、JSON をリポジトリ直下に `client_secret.json` として置く（`.gitignore` 済み）
+3. `python auth_setup.py --client-secret client_secret.json` を実行し、4つの秘密情報を Secret Manager に登録する。値は入力待ちの画面に貼り付け、コマンド履歴に残さない（macOS 標準の zsh の書き方。bash では `read -rsp "クライアントシークレット: " V`）:
+   ```bash
+   printf '%s' "$(openssl rand -hex 24)" | gcloud secrets create MCP_SHARED_SECRET --data-file=-
+   printf '%s' "$(openssl rand -hex 32)" | gcloud secrets create MCP_TOKEN_SIGNING_KEY --data-file=-
+   read -rs "V?クライアントシークレット: "; printf '%s' "$V" | gcloud secrets create GOOGLE_CLIENT_SECRET --data-file=-; unset V
+   read -rs "V?refresh_token: "; printf '%s' "$V" | gcloud secrets create GOOGLE_REFRESH_TOKEN --data-file=-; unset V
+   ```
+   パスフレーズは `gcloud secrets versions access latest --secret=MCP_SHARED_SECRET` で取り出し、パスワードマネージャーに保存する。続けて `<プロジェクト番号>-compute@developer.gserviceaccount.com` に `roles/secretmanager.secretAccessor` を付与し、Cloud Run がシークレットを読めるようにする
+4. 1回でデプロイする。Cloud Run の URL は `https://<サービス名>-<プロジェクト番号>.<リージョン>.run.app` で事前に決まり、`PUBLIC_BASE_URL` がないとサーバーは起動しない:
+   ```bash
+   gcloud run deploy google-health-mcp --source . --region asia-northeast1 --allow-unauthenticated \
+     --set-env-vars "PUBLIC_BASE_URL=https://google-health-mcp-<プロジェクト番号>.asia-northeast1.run.app,GOOGLE_CLIENT_ID=<クライアントID>" \
+     --set-secrets "MCP_SHARED_SECRET=MCP_SHARED_SECRET:latest,MCP_TOKEN_SIGNING_KEY=MCP_TOKEN_SIGNING_KEY:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,GOOGLE_REFRESH_TOKEN=GOOGLE_REFRESH_TOKEN:latest"
+   ```
+   `--allow-unauthenticated` は URL に到達できるようにするだけで、`/mcp` は OAuth で保護される。起動すると `curl <URL>/.well-known/oauth-authorization-server` が JSON を返す
+5. Claude の Settings → Connectors → Add custom connector に `<URL>/mcp` を登録し、同意画面でパスフレーズを入力する
+
+コードを更新したときは、`--source . --region asia-northeast1` だけを付けて同じ `gcloud run deploy` を実行する。環境変数とシークレットは引き継がれる。
 
 ### Google のトークンの更新（同意画面が「テスト」のとき）
 
