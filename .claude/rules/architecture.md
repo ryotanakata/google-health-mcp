@@ -83,5 +83,5 @@ class HealthService:
 
 ## 運用上の制約
 
-- Cloud Run への実デプロイ・GCP リソースの作成変更は、人間が明示的に指示したときのみ行う。通常のデプロイは `main` へのマージ後に `.github/workflows/deploy.yml` が行う（GCP への認証は Workload Identity Federation で、このリポジトリの `main` の `production` 環境に限る）
+- Cloud Run への実デプロイ・GCP リソースの作成変更は、人間が明示的に指示したときのみ行う。通常のデプロイは `main` へのマージ後に `.github/workflows/deploy.yml` が行う（GCP への認証は Workload Identity Federation で、このリポジトリの `main` に限る）
 - 新しいツールを追加するときは、必要な Google のスコープが `GOOGLE_HEALTH_SCOPES` に含まれているか確認する。スコープを増やすと refresh_token の取り直し（`auth_setup.py` の再実行）が必要になる

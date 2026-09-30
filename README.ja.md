@@ -107,9 +107,9 @@ gcloud iam workload-identity-pools create github --location=global
 gcloud iam workload-identity-pools providers create-oidc github --location=global \
   --workload-identity-pool=github --issuer-uri=https://token.actions.githubusercontent.com \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main' && assertion.environment=='production'"
+  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main'"
 gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
-  --member="principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/subject/repo:$REPO:environment:production"
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
 ```
 
 続けて GitHub 側を設定する:
@@ -118,7 +118,7 @@ gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workload
 2. Settings → Branches（または Rules）で `main` を保護し、マージ前に PR と `CI` のステータスチェックを必須にする
 3. リポジトリ変数（Settings → Secrets and variables → Actions → Variables）を登録する。どれも秘密情報ではない。`GCP_WORKLOAD_IDENTITY_PROVIDER` が未設定の間はデプロイのジョブを飛ばす
 
-Google Cloud はこのリポジトリの `main` かつ `production` 環境のトークンだけを受け付け、GitHub は `main` にしか `production` 環境を使わせない。
+Google Cloud はこのリポジトリの `main` のトークンだけを受け付け、GitHub は `main` にしか `production` 環境を使わせない。
 
 | 変数 | 値 |
 | --- | --- |

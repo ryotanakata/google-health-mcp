@@ -107,9 +107,9 @@ gcloud iam workload-identity-pools create github --location=global
 gcloud iam workload-identity-pools providers create-oidc github --location=global \
   --workload-identity-pool=github --issuer-uri=https://token.actions.githubusercontent.com \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main' && assertion.environment=='production'"
+  --attribute-condition="assertion.repository=='$REPO' && assertion.ref=='refs/heads/main'"
 gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
-  --member="principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/subject/repo:$REPO:environment:production"
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
 ```
 
 On GitHub:
@@ -118,7 +118,7 @@ On GitHub:
 2. Settings → Branches (or Rules) → protect `main`: require a pull request and the `CI` status check before merging
 3. Add these repository variables (Settings → Secrets and variables → Actions → Variables). None of them is a secret. Until `GCP_WORKLOAD_IDENTITY_PROVIDER` is set, the deploy job is skipped
 
-Google Cloud only accepts tokens from the `production` environment on `main` of this repository, and GitHub only lets `main` use that environment.
+Google Cloud only accepts tokens from `main` of this repository, and GitHub only lets `main` use the `production` environment.
 
 | Variable | Value |
 | --- | --- |
