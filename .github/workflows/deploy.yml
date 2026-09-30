@@ -28,7 +28,7 @@ jobs:
         github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     # GitHub の Environment で main からのデプロイだけを許可し、必要なら承認を挟む
-    # （README の「継続的デプロイ」）
+    # （docs/deployment.ja.md の「継続的デプロイ」）
     environment: production
     permissions:
       contents: read
