@@ -51,7 +51,8 @@ def create_app(settings: Settings) -> Starlette:
 
     @mcp.tool()
     async def get_heart_rate_summary(date: str) -> HeartRateSummary:
-        """指定日（YYYY-MM-DD）の安静時心拍数・心拍ゾーン滞在時間を取得する。"""
+        """指定日（YYYY-MM-DD）の安静時心拍数と、心拍が上がっていた時間（moderate / vigorous /
+        peak ゾーンの滞在分とその合計）を取得する。"""
         return await health_service.get_heart_rate_summary(date)
 
     @mcp.tool()

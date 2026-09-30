@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Literal
 
-from src.constants import EXERCISE_HISTORY_MAX_DAYS
+from src.constants import EXERCISE_HISTORY_MAX_DAYS, HEART_RATE_ELEVATED_ZONES
 from src.models import (
     DailyActivity,
     ExerciseHistory,
@@ -117,15 +117,16 @@ class HealthService:
     def summarize_heart_rate(date: str, resting: list[dict], zones: list[dict]) -> HeartRateSummary:
         resting_value = HealthService._first(resting).get("dailyRestingHeartRate", {})
         zone_values = HealthService._first(zones).get("timeInHeartRateZone", {})
+        zone_minutes = {
+            name.lower(): HealthService._duration_minutes(zone.get("duration")) or 0
+            for zone in zone_values.get("timeInHeartRateZones", [])
+            if (name := zone.get("heartRateZone", "")) in HEART_RATE_ELEVATED_ZONES
+        }
         return {
             "date": date,
             "resting_heart_rate": HealthService._to_int(resting_value.get("beatsPerMinute")),
-            "heart_rate_zone_minutes": {
-                zone.get("heartRateZone", "").lower(): (
-                    HealthService._duration_minutes(zone.get("duration")) or 0
-                )
-                for zone in zone_values.get("timeInHeartRateZones", [])
-            },
+            "heart_rate_zone_minutes": zone_minutes,
+            "elevated_heart_rate_minutes": sum(zone_minutes.values()),
         }
 
     @staticmethod

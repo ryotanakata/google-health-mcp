@@ -138,6 +138,33 @@ def test_summarize_heart_rate():
     )
     assert result["resting_heart_rate"] == 58
     assert result["heart_rate_zone_minutes"] == {"moderate": 30, "peak": 5}
+    assert result["elevated_heart_rate_minutes"] == 35
+
+
+def _zones(**minutes: int) -> list[dict]:
+    return [
+        {
+            "timeInHeartRateZone": {
+                "timeInHeartRateZones": [
+                    {"heartRateZone": zone, "duration": f"{value * 60}s"}
+                    for zone, value in minutes.items()
+                ]
+            }
+        }
+    ]
+
+
+def test_summarize_heart_rate_excludes_light_zone():
+    zones = _zones(LIGHT=1355, MODERATE=38, VIGOROUS=45, PEAK=2)
+    result = HealthService.summarize_heart_rate("2026-09-27", resting=[], zones=zones)
+    assert result["heart_rate_zone_minutes"] == {"moderate": 38, "vigorous": 45, "peak": 2}
+    assert result["elevated_heart_rate_minutes"] == 85
+
+
+def test_summarize_heart_rate_with_only_light_zone():
+    result = HealthService.summarize_heart_rate("2026-09-29", resting=[], zones=_zones(LIGHT=1440))
+    assert result["heart_rate_zone_minutes"] == {}
+    assert result["elevated_heart_rate_minutes"] == 0
 
 
 def test_summarize_exercise():

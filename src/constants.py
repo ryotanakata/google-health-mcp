@@ -24,11 +24,14 @@ GOOGLE_HEALTH_SCOPES = [
 # auth_setup.py --token-only で、ブラウザでの許可を待つ上限
 GOOGLE_REAUTH_TIMEOUT_SECONDS = 10 * 60
 
-# --- ツール入力の検証（service.py） ---
+# --- ツール入力の検証と要約（service.py） ---
 
 # get_exercise_history の期間上限（両端を含む日数）。QUERY_MAX_DAYS ごとの分割は直列に
 # 送るため、期間が長いとリクエスト数に比例して応答が遅れ、API の利用枠も消費する
 EXERCISE_HISTORY_MAX_DAYS = 366
+# time-in-heart-rate-zone の日次集計は1日（1440分）を必ずどれかのゾーンに振り分け、LIGHT には
+# 睡眠・安静・未装着を含む残りの時間が入る。運動時間と誤読されないよう、要約はこの3ゾーンに限る
+HEART_RATE_ELEVATED_ZONES = ("MODERATE", "VIGOROUS", "PEAK")
 
 # --- Google Health API（repository.py） ---
 
