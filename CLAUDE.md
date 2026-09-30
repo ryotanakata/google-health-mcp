@@ -44,8 +44,9 @@ src/
 
 ## 現状の注意点
 
-- Google Health API は公式ディスカバリドキュメントに沿って実装済みだが、実アカウントでの疎通確認はまだ
-- Cloud Run の URL はデプロイ後に決まるため、`PUBLIC_BASE_URL` を設定して再デプロイが必要
+- 実アカウント（Google Fitbit Air）・Cloud Run 上で全ツールの疎通を確認済み。ディスカバリドキュメントと実際の応答が食い違う箇所がある（例: 睡眠・ワークアウトの `civilStartTime` は返らない）ので、応答の形を変える変更は実データでも確かめる
+- OAuth 同意画面は「テスト」のまま運用するため、Google の refresh_token は発行から7日で失効する。`scripts/refresh_google_token.sh` で5日ごとに取り直す
+- Cloud Run の URL は `https://<サービス名>-<プロジェクト番号>.<リージョン>.run.app` でデプロイ前に決まる。`PUBLIC_BASE_URL` が未設定だとサーバーは起動しないので、初回デプロイからこの値を渡す
 
 ## 自律開発ループ（Notion連携）
 
