@@ -32,21 +32,27 @@ flowchart LR
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `get_daily_activity` | `date` | Steps, calories, distance, active minutes |
+| `get_daily_activity` | `date` | Steps, calories, distance, active minutes, floors, active zone minutes |
 | `get_sleep_log` | `date` | Sleep that ended that morning: duration, efficiency, stages, naps |
 | `get_heart_rate_summary` | `date` | Resting heart rate, minutes in the moderate / vigorous / peak zones and their total |
 | `get_exercise_history` | `start_date`, `end_date` | Workouts: type, time, calories, average heart rate, distance |
+| `get_health_metrics` | `date` | Heart rate variability, respiratory rate, SpO2, skin temperature and its baseline, VO2 max |
+| `get_body_measurements` | `start_date`, `end_date` | Weight and body fat: first, last, min, max, average, and one value per day |
+| `get_activity_trend` | `start_date`, `end_date` | Activity and resting heart rate per day, with the totals and averages for the range |
 
-Dates are `YYYY-MM-DD`; ranges include both ends and are limited to 366 days.
+Dates are `YYYY-MM-DD` and ranges include both ends. `get_exercise_history` accepts up to 366 days, `get_body_measurements` and `get_activity_trend` up to 90.
 
 ## Data Constraints
 
 - One request covers up to 90 days (14 days for multi-day heart rate and calorie aggregates). Longer ranges are split and merged
 - Results are paged (25 per page for workouts and sleep) and fetched to the end
 - The light heart rate zone is not returned: the daily rollup assigns every minute of the day to a zone, so light also holds sleep, rest, and time the device was not worn
+- Active zone minutes are not clock minutes: cardio and peak earn 2 per minute, fat burn 1. For time spent in each zone, use `get_heart_rate_summary`
+- The metrics in `get_health_metrics` are measured mainly while you sleep, so a night without the device on comes back as `null` rather than an error. They are dated by the date the API records for that night, which has not been cross-checked against `get_sleep_log`
+- `get_body_measurements` returns one value per day, the last record of that day, and only for days that have a record
 - Google's own scores (Sleep Score, Daily Readiness) are not available through the API
 - Sleep and workout start/end times are in the local time zone recorded with each session
-- Tested with a real Google Fitbit Air account. Google Health Premium is not assumed, but whether every data type is available without it has not been checked
+- Tested with a real Google Fitbit Air account. Google Health Premium is not assumed, but whether every data type is available without it has not been checked. Whether a Fitbit Air records every metric in `get_health_metrics`, and floors, has not been checked either
 
 ## Quick Start
 

@@ -32,21 +32,27 @@ flowchart LR
 
 | ツール | 引数 | 返却内容 |
 | --- | --- | --- |
-| `get_daily_activity` | `date` | 歩数・消費カロリー・移動距離・アクティブ時間 |
+| `get_daily_activity` | `date` | 歩数・消費カロリー・移動距離・アクティブ時間・上った階数・アクティブゾーン時間 |
 | `get_sleep_log` | `date` | その日の朝に終わった睡眠：睡眠時間・効率・ステージ・仮眠 |
 | `get_heart_rate_summary` | `date` | 安静時心拍数・moderate / vigorous / peak ゾーンの滞在時間とその合計 |
 | `get_exercise_history` | `start_date`, `end_date` | ワークアウト：種目・時間・カロリー・平均心拍・距離 |
+| `get_health_metrics` | `date` | 心拍変動・呼吸数・SpO2・皮膚温と基準値・VO2 Max |
+| `get_body_measurements` | `start_date`, `end_date` | 体重・体脂肪率：期間の最初・最後・最小・最大・平均と、日別の値 |
+| `get_activity_trend` | `start_date`, `end_date` | 日別の活動量と安静時心拍数、期間の合計・平均 |
 
-日付は `YYYY-MM-DD`。期間は両端を含み、最大366日。
+日付は `YYYY-MM-DD`。期間は両端を含み、上限は `get_exercise_history` が366日、`get_body_measurements` と `get_activity_trend` が90日。
 
 ## データ取得の制約
 
 - 1リクエストの期間は最大90日（心拍・カロリーの複数日集計は14日）。長い期間は分割して取得・結合する
 - 結果はページ単位（ワークアウト・睡眠は1ページ25件）で、最後まで取得する
 - 心拍ゾーンの light は返さない。日次集計は1日の全時間をどれかのゾーンに振り分けるため、light には睡眠・安静・未装着の時間も入る
+- アクティブゾーン時間は実時間の分数ではない。cardio と peak は1分あたり2、fat burn は1が加算される。ゾーンごとの滞在時間が必要なときは `get_heart_rate_summary` を使う
+- `get_health_metrics` の指標は主に睡眠中に計測されるため、未装着の夜はエラーではなく `null` になる。日付は API がその夜に記録した日付で、`get_sleep_log` と同じ夜になるかは未確認
+- `get_body_measurements` は1日1件（その日の最後の記録）を、記録があった日だけ返す
 - Google 独自のスコア（睡眠スコア、Daily Readiness）は API では取得できない
 - 睡眠・ワークアウトの開始・終了時刻は、各セッションに記録された現地時刻で返す
-- 実機（Google Fitbit Air のアカウント）で動作を確認済み。Google Health Premium の契約は前提にしていないが、契約なしで全データ型を取得できるかは未確認
+- 実機（Google Fitbit Air のアカウント）で動作を確認済み。Google Health Premium の契約は前提にしていないが、契約なしで全データ型を取得できるかは未確認。Fitbit Air が `get_health_metrics` の各指標と階数を実際に記録するかも未確認
 
 ## クイックスタート
 
