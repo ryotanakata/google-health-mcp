@@ -32,6 +32,12 @@ EXERCISE_HISTORY_MAX_DAYS = 366
 # time-in-heart-rate-zone の日次集計は1日（1440分）を必ずどれかのゾーンに振り分け、LIGHT には
 # 睡眠・安静・未装着を含む残りの時間が入る。運動時間と誤読されないよう、要約はこの3ゾーンに限る
 HEART_RATE_ELEVATED_ZONES = ("MODERATE", "VIGOROUS", "PEAK")
+# get_body_measurements の期間上限（両端を含む日数）。1リクエストの上限（QUERY_MAX_DAYS）と
+# 同じ値にして、期間の分割なしで取れる範囲に収める
+BODY_MEASUREMENTS_MAX_DAYS = 90
+# get_activity_trend の期間上限（両端を含む日数）。14日上限のデータ型はこの期間で7分割されるため、
+# これより長くするとリクエスト数に比例して応答が遅れる
+ACTIVITY_TREND_MAX_DAYS = 90
 
 # --- Google Health API（repository.py） ---
 
@@ -41,6 +47,7 @@ HEALTH_API_BASE_URL = "https://health.googleapis.com/v4/users/me/dataTypes"
 # 1リクエストあたりのクエリ期間上限。
 # heart-rate / active-minutes / total-calories / calories-in-heart-rate-zone は14日、それ以外は90日
 QUERY_MAX_DAYS = 90
+QUERY_SHORT_MAX_DAYS = 14
 # exercise・sleep の list は pageSize の上限が25
 SESSION_PAGE_SIZE = 25
 HEALTH_API_MAX_ERROR_BODY_CHARS = 500

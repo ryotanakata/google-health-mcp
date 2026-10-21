@@ -17,6 +17,7 @@ from src.constants import (
     HEALTH_API_MAX_ERROR_BODY_CHARS,
     HEALTH_API_TIMEOUT_SECONDS,
     QUERY_MAX_DAYS,
+    QUERY_SHORT_MAX_DAYS,
     SESSION_PAGE_SIZE,
 )
 from src.google_auth import GoogleAuthManager
@@ -34,12 +35,74 @@ class HealthRepository:
         self._base_url = base_url
 
     async def fetch_activity_rollups(self, day: dt.date) -> dict[str, list[dict]]:
-        data_types = ("steps", "distance", "total-calories", "active-minutes")
+        data_types = (
+            "steps",
+            "distance",
+            "total-calories",
+            "active-minutes",
+            "floors",
+            "active-zone-minutes",
+        )
         async with self._client() as client:
             results = await asyncio.gather(
-                *(self._daily_rollup(client, data_type, day) for data_type in data_types)
+                *(self._daily_rollup(client, data_type, day, day) for data_type in data_types)
             )
         return dict(zip(data_types, results, strict=True))
+
+    async def fetch_daily_metrics(self, day: dt.date) -> dict[str, list[dict]]:
+        """day の日次サマリー（HRV・呼吸数・SpO2・皮膚温・VO2 Max）をデータ型ごとに返す。"""
+        data_types = (
+            "daily-heart-rate-variability",
+            "daily-respiratory-rate",
+            "daily-oxygen-saturation",
+            "daily-sleep-temperature-derivations",
+            "daily-vo2-max",
+        )
+        next_day = day + dt.timedelta(days=1)
+        async with self._client() as client:
+            results = await asyncio.gather(
+                *(
+                    self._list(client, data_type, self._daily_date_filter(data_type, day, next_day))
+                    for data_type in data_types
+                )
+            )
+        return dict(zip(data_types, results, strict=True))
+
+    async def fetch_body_measurements(self, start: dt.date, end: dt.date) -> dict[str, list[dict]]:
+        """start・end の両日を含む期間の体重・体脂肪率をデータ型ごとに返す。"""
+        data_types = ("weight", "body-fat")
+        async with self._client() as client:
+            results = await asyncio.gather(
+                *(
+                    self._sample_time_list(client, data_type, start, end)
+                    for data_type in data_types
+                )
+            )
+        return dict(zip(data_types, results, strict=True))
+
+    async def fetch_activity_trend(
+        self, start: dt.date, end: dt.date
+    ) -> tuple[dict[str, list[dict]], list[dict]]:
+        """(データ型ごとの日次集計, 安静時心拍数) を返す。start・end の両日を含む。"""
+        rollups = (
+            ("steps", QUERY_MAX_DAYS),
+            ("distance", QUERY_MAX_DAYS),
+            ("total-calories", QUERY_SHORT_MAX_DAYS),
+            ("active-minutes", QUERY_SHORT_MAX_DAYS),
+            ("floors", QUERY_MAX_DAYS),
+            ("active-zone-minutes", QUERY_MAX_DAYS),
+        )
+        async with self._client() as client:
+            *rollup_points, resting = await asyncio.gather(
+                *(
+                    self._split_daily_rollup(client, data_type, start, end, max_days)
+                    for data_type, max_days in rollups
+                ),
+                self._daily_date_list(client, "daily-resting-heart-rate", start, end),
+            )
+        return dict(
+            zip((data_type for data_type, _ in rollups), rollup_points, strict=True)
+        ), resting
 
     async def fetch_sleep_sessions(self, day: dt.date) -> list[dict]:
         """day に終わった睡眠を返す（前夜〜当日朝の睡眠と当日の仮眠）。
@@ -64,10 +127,9 @@ class HealthRepository:
                 self._list(
                     client,
                     "daily-resting-heart-rate",
-                    f'daily_resting_heart_rate.date >= "{day.isoformat()}" '
-                    f'AND daily_resting_heart_rate.date < "{next_day.isoformat()}"',
+                    self._daily_date_filter("daily-resting-heart-rate", day, next_day),
                 ),
-                self._daily_rollup(client, "time-in-heart-rate-zone", day),
+                self._daily_rollup(client, "time-in-heart-rate-zone", day, day),
             )
         return resting, zones
 
@@ -121,19 +183,78 @@ class HealthRepository:
 
     @staticmethod
     async def _daily_rollup(
-        client: httpx.AsyncClient, data_type: str, day: dt.date
+        client: httpx.AsyncClient, data_type: str, start: dt.date, end: dt.date
     ) -> list[dict]:
-        body = {
+        """start・end の両日を含む期間を1日ごとの枠で集計する。枠は civilStartTime で区別する。"""
+        body: dict = {
             "range": {
-                "start": HealthRepository._civil_date(day),
-                "end": HealthRepository._civil_date(day + dt.timedelta(days=1)),
+                "start": HealthRepository._civil_date(start),
+                "end": HealthRepository._civil_date(end + dt.timedelta(days=1)),
             },
             "windowSizeDays": 1,
         }
-        raw = await HealthRepository._request(
-            client, "POST", f"/{data_type}/dataPoints:dailyRollUp", json=body
-        )
-        return raw.get("rollupDataPoints", [])
+        points: list[dict] = []
+        while True:
+            raw = await HealthRepository._request(
+                client, "POST", f"/{data_type}/dataPoints:dailyRollUp", json=body
+            )
+            points.extend(raw.get("rollupDataPoints", []))
+            next_page_token = raw.get("nextPageToken")
+            if not next_page_token:
+                return points
+            body = {**body, "pageToken": next_page_token}
+
+    @staticmethod
+    async def _split_daily_rollup(
+        client: httpx.AsyncClient, data_type: str, start: dt.date, end: dt.date, max_days: int
+    ) -> list[dict]:
+        points: list[dict] = []
+        for chunk_start, chunk_end in HealthRepository.split_date_range(start, end, max_days):
+            points.extend(
+                await HealthRepository._daily_rollup(client, data_type, chunk_start, chunk_end)
+            )
+        return points
+
+    @staticmethod
+    async def _daily_date_list(
+        client: httpx.AsyncClient, data_type: str, start: dt.date, end: dt.date
+    ) -> list[dict]:
+        points: list[dict] = []
+        for chunk_start, chunk_end in HealthRepository.split_date_range(start, end, QUERY_MAX_DAYS):
+            points.extend(
+                await HealthRepository._list(
+                    client,
+                    data_type,
+                    HealthRepository._daily_date_filter(
+                        data_type, chunk_start, chunk_end + dt.timedelta(days=1)
+                    ),
+                )
+            )
+        return points
+
+    @staticmethod
+    async def _sample_time_list(
+        client: httpx.AsyncClient, data_type: str, start: dt.date, end: dt.date
+    ) -> list[dict]:
+        field = f"{data_type.replace('-', '_')}.sample_time.civil_time"
+        points: list[dict] = []
+        for chunk_start, chunk_end in HealthRepository.split_date_range(start, end, QUERY_MAX_DAYS):
+            exclusive_end = chunk_end + dt.timedelta(days=1)
+            points.extend(
+                await HealthRepository._list(
+                    client,
+                    data_type,
+                    f'{field} >= "{chunk_start.isoformat()}" '
+                    f'AND {field} < "{exclusive_end.isoformat()}"',
+                )
+            )
+        return points
+
+    @staticmethod
+    def _daily_date_filter(data_type: str, start: dt.date, exclusive_end: dt.date) -> str:
+        """日次サマリーの日付 filter。filter ではデータ型名をアンダースコアで書く。"""
+        field = f"{data_type.replace('-', '_')}.date"
+        return f'{field} >= "{start.isoformat()}" AND {field} < "{exclusive_end.isoformat()}"'
 
     @staticmethod
     async def _list(

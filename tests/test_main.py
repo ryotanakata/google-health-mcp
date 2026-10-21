@@ -165,11 +165,18 @@ async def test_full_oauth_flow_allows_mcp_access(app):
             "get_sleep_log",
             "get_heart_rate_summary",
             "get_exercise_history",
+            "get_health_metrics",
+            "get_body_measurements",
+            "get_activity_trend",
         }
         # models.py の TypedDict から戻り値のスキーマが生成され、Claude に伝わること
         listed = tools.json()["result"]["tools"]
         schemas = {tool["name"]: tool.get("outputSchema") for tool in listed}
         assert "resting_heart_rate" in schemas["get_heart_rate_summary"]["properties"]
+        assert "active_zone_minutes" in schemas["get_daily_activity"]["properties"]
+        assert "skin_temperature" in schemas["get_health_metrics"]["properties"]
+        assert "weight_kg" in schemas["get_body_measurements"]["properties"]
+        assert "averages" in schemas["get_activity_trend"]["properties"]
 
 
 
