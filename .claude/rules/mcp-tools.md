@@ -18,6 +18,21 @@ paths:
 - ツールの docstring に、引数の形式（`YYYY-MM-DD`、期間の両端を含むか）と返す内容を書く（Claude がツールを選ぶ手がかりになる）
 - 追加・変更するツールは `README.md` の「MCP Tools」と一致させる。ツールを変えたら `README.md` と `README.ja.md` を同じ変更で更新する
 
+## ツールの注釈
+
+- すべてのツールに `annotations` を付ける。読み取りツールは `readOnlyHint=True`、書き込みツールは `readOnlyHint=False`、削除ツールはさらに `destructiveHint=True`（`constants.py` の `MCP_READ_ONLY_TOOL` / `MCP_WRITE_TOOL` / `MCP_DESTRUCTIVE_TOOL`）
+- 書き込み・削除ツールの戻り値には、作成・削除した記録の `name` と内容の要約を含める（Claude が利用者に確認を返せるようにするため）
+
+```python
+# NG: 書き込みツールが読み取りと同じ扱いになる
+@mcp.tool()
+async def log_water(amount_ml: float) -> WaterLog: ...
+
+# OK
+@mcp.tool(annotations=MCP_WRITE_TOOL)
+async def log_water(amount_ml: float) -> WaterLog: ...
+```
+
 ## 戻り値の型
 
 - ツールの戻り値は `dict` にせず、`src/models.py` の TypedDict で型注釈する（MCP SDK がここから outputSchema を生成し、Claude に構造が伝わる）

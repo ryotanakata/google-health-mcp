@@ -26,7 +26,7 @@ paths:
 - **Google の refresh_token はローカルでのみ取得する**（`auth_setup.py`）。ブラウザの同意画面が必要なため、サーバー上で取得する経路を作らない。同意画面が「テスト」のままだと7日で失効するので、`scripts/refresh_google_token.sh` で取り直す
 - **生の時系列データを Claude に返さない**。MCP サーバー側で要約してから返す（コンテキストトークン節約のため）
 - **サーバーはリクエストの処理中以外に CPU を使わない**。サーバーに常駐する接続・バックグラウンド処理・定期実行を入れない（利用者の PC で動く `scripts/` の定期実行は対象外。Cloud Run の「CPU はリクエスト処理中のみ割り当て」で無料枠内に収めるため）
-- **読み取り専用**。Google Health API への書き込み（`create` / `patch` / `batchDelete`）を実装しない
+- **書き込みは食事（`nutrition-log`）と水分（`hydration-log`）に限る**。それ以外のデータ型への `create` / `patch` / `batchDelete` を実装しない
 
 ## 処理の流れ
 
