@@ -2,7 +2,7 @@
 
 ![Claude が「昨夜の睡眠」の質問に、睡眠ステージのグラフと要約で答えている画面（英語・日本語）](docs/screenshot.png)
 
-**Google Fitbit Air の健康データを、Google Health API 経由で Claude から呼び出すリモート MCP サーバー。**
+**Google Fitbit Air の健康データを Google Health API 経由で Claude から呼び出し、食事・水分を記録できるリモート MCP サーバー。**
 
 [![CI](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -13,7 +13,7 @@
 
 ---
 
-Claude に「昨日の睡眠はどうだった？」と聞くと、このサーバーが Google Health API からデータを取り、要約して返す。Fitbit・Pixel Watch のデータも同じように扱える。
+Claude に「昨日の睡眠はどうだった？」と聞くと、このサーバーが Google Health API からデータを取り、要約して返す。「お昼に親子丼を食べた」と話せば食事のログに記録する。Fitbit・Pixel Watch のデータも同じように扱える。
 
 ## 構成
 
@@ -21,12 +21,13 @@ Claude に「昨日の睡眠はどうだった？」と聞くと、このサー�
 flowchart LR
     C["Claude"] -- "OAuth 2.1 + ツール呼び出し" --> M["MCP サーバー<br/>(Cloud Run)"]
     M -- "アクセストークン" --> GO["Google OAuth"]
-    M -- "読み取り専用" --> GH["Google Health API"]
+    M -- "読み取り＋食事・水分の記録" --> GH["Google Health API"]
 ```
 
 - サーバー自身が Claude 向けの OAuth 2.1 認可サーバーを兼ねる。同意画面でパスフレーズ（`MCP_SHARED_SECRET`）を入力したときだけトークンを発行する
 - 状態を持たない。トークンは署名付き JWT なので DB は不要
 - 生の時系列データではなく、要約を返す
+- 書き込めるのは食事と水分だけで、ほかのデータ型は読み取り専用
 
 ## MCP ツール
 
@@ -39,8 +40,13 @@ flowchart LR
 | `get_health_metrics` | `date` | 心拍変動・呼吸数・SpO2・皮膚温と基準値・VO2 Max |
 | `get_body_measurements` | `start_date`, `end_date` | 体重・体脂肪率：期間の最初・最後・最小・最大・平均と、日別の値 |
 | `get_activity_trend` | `start_date`, `end_date` | 日別の活動量と安静時心拍数、期間の合計・平均 |
+| `get_nutrition_log` | `date` | その日の食事・水分：合計（kcal・PFC・ml）と、記録ごとの内容と `name` |
+| `get_devices` | — | ペアリング済みデバイスごとの製品名・種類・バッテリー・最終同期時刻 |
+| `log_meal` | `meal_type`, `items`, `date?`, `time?` | 1回の食事を記録する。品目ごとに1件ずつ書き、その `name` を返す |
+| `log_water` | `amount_ml`, `date?`, `time?` | 水分を ml で記録し、その `name` を返す |
+| `delete_nutrition_logs` | `names` | `get_nutrition_log` が返した `name` で食事・水分の記録を削除する |
 
-日付は `YYYY-MM-DD`。期間は両端を含み、上限は `get_exercise_history` が366日、`get_body_measurements` と `get_activity_trend` が90日。
+日付は `YYYY-MM-DD`。期間は両端を含み、上限は `get_exercise_history` が366日、`get_body_measurements` と `get_activity_trend` が90日。記録系の `date`（`YYYY-MM-DD`）と `time`（`HH:MM`）を省略すると、`NUTRITION_LOG_TIME_ZONE`（`Asia/Tokyo`）の現在時刻になる。
 
 ## データ取得の制約
 
@@ -52,6 +58,10 @@ flowchart LR
 - `get_body_measurements` は1日1件（その日の最後の記録）を、記録があった日だけ返す
 - Google 独自のスコア（睡眠スコア、Daily Readiness）は API では取得できない
 - 睡眠・ワークアウトの開始・終了時刻は、各セッションに記録された現地時刻で返す
+- 食事は匿名方式（`foodDisplayName` と渡された栄養素）で記録する。API に食品名で検索する filter が無いため。**匿名方式の記録は編集できない**ので、直すときは削除して記録し直す
+- `log_meal` の kcal・PFC は呼び出し側が渡す。サーバーは栄養価を調べない
+- 書き込みには `googlehealth.nutrition.writeonly`、Fitbit アプリで記録した食事の読み取りには `googlehealth.nutrition.readonly` が要る。refresh_token にスコープが付くまで、食事・水分・デバイスのツールは取り直しを促す 403 を返す
+- 食事・水分・デバイスのツールは実機での確認が未了。ほかのツールは確認済み
 - 実機（Google Fitbit Air のアカウント）で動作を確認済み。Google Health Premium の契約は前提にしていないが、契約なしで全データ型を取得できるかは未確認。Fitbit Air が `get_health_metrics` の各指標と階数を実際に記録するかも未確認
 
 ## クイックスタート
@@ -75,7 +85,7 @@ python -m src.main                                       # http://localhost:8080
 
 ## デプロイ
 
-1. Google Cloud で Google Health API を有効化し、読み取り専用スコープで OAuth 同意画面を設定して `client_secret.json` を取得する
+1. Google Cloud で Google Health API を有効化し、`GOOGLE_HEALTH_SCOPES` のスコープで OAuth 同意画面を設定して `client_secret.json` を取得する
 2. ローカルで `auth_setup.py` を実行し、秘密情報を Secret Manager に登録する
 3. `PUBLIC_BASE_URL` にサービスの URL（`https://<サービス名>-<プロジェクト番号>.<リージョン>.run.app`）を設定して Cloud Run にデプロイする
 4. Claude の Settings → Connectors → Add custom connector に `https://<サービス>.run.app/mcp` を登録し、同意画面でパスフレーズを入力する

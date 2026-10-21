@@ -2,7 +2,7 @@
 
 ![Claude answering "How did I sleep last night?" in English and Japanese with a sleep stage chart and summary](docs/screenshot.png)
 
-**A remote MCP server that lets Claude read your Google Fitbit Air health data through the Google Health API.**
+**A remote MCP server that lets Claude read your Google Fitbit Air health data through the Google Health API, and log what you eat and drink.**
 
 [![CI](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ryotanakata/google-health-mcp/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
@@ -13,7 +13,7 @@
 
 ---
 
-Ask Claude "How did I sleep last night?" and this server fetches the data from the Google Health API, summarizes it, and returns it. Fitbit and Pixel Watch data works too.
+Ask Claude "How did I sleep last night?" and this server fetches the data from the Google Health API, summarizes it, and returns it. Tell it "I had oyakodon for lunch" and it writes the meal to your nutrition log. Fitbit and Pixel Watch data works too.
 
 ## Architecture
 
@@ -21,12 +21,13 @@ Ask Claude "How did I sleep last night?" and this server fetches the data from t
 flowchart LR
     C["Claude"] -- "OAuth 2.1 + tool calls" --> M["MCP server<br/>(Cloud Run)"]
     M -- "access token" --> GO["Google OAuth"]
-    M -- "read-only" --> GH["Google Health API"]
+    M -- "read + nutrition write" --> GH["Google Health API"]
 ```
 
 - The server is also the OAuth 2.1 authorization server for Claude. It issues tokens only after you enter your passphrase (`MCP_SHARED_SECRET`) on its consent screen
 - It is stateless: tokens are signed JWTs, so no database is needed
 - It returns summaries, not raw time series
+- Writes are limited to meals and hydration; every other data type is read-only
 
 ## MCP Tools
 
@@ -39,8 +40,13 @@ flowchart LR
 | `get_health_metrics` | `date` | Heart rate variability, respiratory rate, SpO2, skin temperature and its baseline, VO2 max |
 | `get_body_measurements` | `start_date`, `end_date` | Weight and body fat: first, last, min, max, average, and one value per day |
 | `get_activity_trend` | `start_date`, `end_date` | Activity and resting heart rate per day, with the totals and averages for the range |
+| `get_nutrition_log` | `date` | Meals and hydration logged that day: totals (kcal, protein, fat, carbs, ml) and each record with its `name` |
+| `get_devices` | — | Each paired device: product name, type, battery status and level, last sync time |
+| `log_meal` | `meal_type`, `items`, `date?`, `time?` | Logs one meal. Writes one record per item and returns their `name`s |
+| `log_water` | `amount_ml`, `date?`, `time?` | Logs hydration in millilitres and returns its `name` |
+| `delete_nutrition_logs` | `names` | Deletes meal and hydration records by the `name` from `get_nutrition_log` |
 
-Dates are `YYYY-MM-DD` and ranges include both ends. `get_exercise_history` accepts up to 366 days, `get_body_measurements` and `get_activity_trend` up to 90.
+Dates are `YYYY-MM-DD` and ranges include both ends. `get_exercise_history` accepts up to 366 days, `get_body_measurements` and `get_activity_trend` up to 90. On the write tools, `date` (`YYYY-MM-DD`) and `time` (`HH:MM`) default to now in `NUTRITION_LOG_TIME_ZONE` (`Asia/Tokyo`).
 
 ## Data Constraints
 
@@ -52,6 +58,10 @@ Dates are `YYYY-MM-DD` and ranges include both ends. `get_exercise_history` acce
 - `get_body_measurements` returns one value per day, the last record of that day, and only for days that have a record
 - Google's own scores (Sleep Score, Daily Readiness) are not available through the API
 - Sleep and workout start/end times are in the local time zone recorded with each session
+- Meals are written anonymously (`foodDisplayName` plus the nutrients you give), because the API has no filter to look a food up by name. **An anonymous record cannot be edited**: to correct one, delete it and log it again
+- `log_meal` takes kcal and PFC from you; the server does not look up nutrition values
+- Writing needs the `googlehealth.nutrition.writeonly` scope, and reading meals written in the Fitbit app needs `googlehealth.nutrition.readonly`. Until the refresh token carries them, the nutrition and device tools return a 403 asking you to renew it
+- The nutrition and device tools have not been checked against a real account yet; every other tool has
 - Tested with a real Google Fitbit Air account. Google Health Premium is not assumed, but whether every data type is available without it has not been checked. Whether a Fitbit Air records every metric in `get_health_metrics`, and floors, has not been checked either
 
 ## Quick Start
@@ -75,7 +85,7 @@ python -m src.main                                       # http://localhost:8080
 
 ## Deploy
 
-1. In Google Cloud, enable the Google Health API, set up the OAuth consent screen with the read-only scopes, and get `client_secret.json`
+1. In Google Cloud, enable the Google Health API, set up the OAuth consent screen with the scopes in `GOOGLE_HEALTH_SCOPES`, and get `client_secret.json`
 2. Run `auth_setup.py` locally and store the secrets in Secret Manager
 3. Deploy to Cloud Run with `PUBLIC_BASE_URL` set to the service URL (`https://<service>-<project-number>.<region>.run.app`)
 4. In Claude: Settings → Connectors → Add custom connector → `https://<service>.run.app/mcp`, then enter the passphrase on the consent screen

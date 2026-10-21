@@ -2,7 +2,7 @@
 
 [日本語版はこちら](deployment.ja.md)
 
-1. In Google Cloud, enable the Google Health API. Set up the OAuth consent screen (user type **External**) with the three read-only scopes in `GOOGLE_HEALTH_SCOPES`, keep it in **Testing**, and add your own Google account as a test user. No app verification or website is needed, but the refresh token expires after 7 days (see below)
+1. In Google Cloud, enable the Google Health API. Set up the OAuth consent screen (user type **External**) with every scope in `GOOGLE_HEALTH_SCOPES`, keep it in **Testing**, and add your own Google account as a test user. No app verification or website is needed, but the refresh token expires after 7 days (see below). See [Scopes](#scopes) for what each one is for
 2. Create an OAuth client of type **Desktop app** and save its JSON as `client_secret.json` in the repository root (it is git-ignored)
 3. Run `python auth_setup.py --client-secret client_secret.json` and store the four secrets in Secret Manager. Paste values at a hidden prompt so they stay out of your shell history (zsh syntax, the macOS default; in bash use `read -rsp "client secret: " V`):
    ```bash
@@ -65,6 +65,25 @@ Google Cloud only accepts tokens from `main` of this repository, and GitHub only
 | `GCP_REGION` / `CLOUD_RUN_SERVICE` | Optional. Default `asia-northeast1` / `google-health-mcp` |
 
 To deploy without a merge, run the Deploy workflow manually (Actions → Deploy → Run workflow) on `main`.
+
+## Scopes
+
+`GOOGLE_HEALTH_SCOPES` in `src/constants.py` is the list to register on the consent screen:
+
+| Scope | Used by |
+| --- | --- |
+| `googlehealth.activity_and_fitness.readonly` | Activity, workouts, heart rate |
+| `googlehealth.sleep.readonly` | Sleep |
+| `googlehealth.health_metrics_and_measurements.readonly` | HRV, SpO2, skin temperature, VO2 max, weight, body fat |
+| `googlehealth.nutrition.readonly` | Reading meals and hydration |
+| `googlehealth.nutrition.writeonly` | Writing and deleting meals and hydration |
+| `googlehealth.settings.readonly` | Paired devices |
+
+Writing is limited to meals and hydration: no other write scope is requested.
+
+`googlehealth.nutrition.readonly` is listed in Google's data type reference but not in the scope list of the discovery document, so the consent screen may refuse it. Without it, the write scope still allows reads, but only of the records this server wrote — meals logged in the Fitbit app will not appear in `get_nutrition_log`.
+
+**After adding scopes, the refresh token has to be reissued**: the scopes granted to a refresh token are fixed when it is issued, so the existing token keeps the old set and the nutrition and device tools return 403. Add the scopes to the consent screen first, then run `scripts/refresh_google_token.sh --force` (or `python auth_setup.py --client-secret client_secret.json` and store the value in Secret Manager yourself), and deploy last. The consent screen will ask you to approve the new permissions.
 
 ## Renewing the Google token (consent screen in Testing)
 
