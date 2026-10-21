@@ -168,6 +168,11 @@ async def test_full_oauth_flow_allows_mcp_access(app):
             "get_health_metrics",
             "get_body_measurements",
             "get_activity_trend",
+            "get_nutrition_log",
+            "get_devices",
+            "log_meal",
+            "log_water",
+            "delete_nutrition_logs",
         }
         # models.py の TypedDict から戻り値のスキーマが生成され、Claude に伝わること
         listed = tools.json()["result"]["tools"]
@@ -177,6 +182,24 @@ async def test_full_oauth_flow_allows_mcp_access(app):
         assert "skin_temperature" in schemas["get_health_metrics"]["properties"]
         assert "weight_kg" in schemas["get_body_measurements"]["properties"]
         assert "averages" in schemas["get_activity_trend"]["properties"]
+        assert "totals" in schemas["get_nutrition_log"]["properties"]
+        assert "devices" in schemas["get_devices"]["properties"]
+
+        # 書き込み・削除ツールであることが注釈で伝わること（mcp-tools.md）
+        annotations = {tool["name"]: tool.get("annotations", {}) for tool in listed}
+        assert annotations["get_nutrition_log"]["readOnlyHint"] is True
+        assert annotations["get_daily_activity"]["readOnlyHint"] is True
+        assert annotations["log_meal"]["readOnlyHint"] is False
+        assert annotations["log_water"]["readOnlyHint"] is False
+        assert annotations["delete_nutrition_logs"]["readOnlyHint"] is False
+        assert annotations["delete_nutrition_logs"]["destructiveHint"] is True
+
+        # log_meal の items が品目ごとの構造で Claude に伝わること
+        meal_item = {tool["name"]: tool for tool in listed}["log_meal"]["inputSchema"]
+        item_properties = meal_item["$defs"]["MealItem"]["properties"]
+        assert set(meal_item["required"]) == {"meal_type", "items"}
+        assert set(meal_item["$defs"]["MealItem"]["required"]) == {"food_name", "energy_kcal"}
+        assert "carbohydrate_g" in item_properties
 
 
 

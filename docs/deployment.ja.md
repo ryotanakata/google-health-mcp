@@ -2,7 +2,7 @@
 
 [English](deployment.md)
 
-1. Google Cloud で Google Health API を有効化する。OAuth 同意画面（ユーザーの種類は**外部**）に `GOOGLE_HEALTH_SCOPES` の読み取り専用スコープ3つを追加し、公開ステータスは**「テスト」のまま**にして、自分の Google アカウントをテストユーザーに登録する。Google の審査や Web サイトは不要だが、refresh_token は7日で失効する（後述）
+1. Google Cloud で Google Health API を有効化する。OAuth 同意画面（ユーザーの種類は**外部**）に `GOOGLE_HEALTH_SCOPES` のスコープをすべて追加し、公開ステータスは**「テスト」のまま**にして、自分の Google アカウントをテストユーザーに登録する。Google の審査や Web サイトは不要だが、refresh_token は7日で失効する（後述）。各スコープの用途は[スコープ](#スコープ)を参照
 2. 種類が**「デスクトップアプリ」**の OAuth クライアントを作り、JSON をリポジトリ直下に `client_secret.json` として置く（`.gitignore` 済み）
 3. `python auth_setup.py --client-secret client_secret.json` を実行し、4つの秘密情報を Secret Manager に登録する。値は入力待ちの画面に貼り付け、コマンド履歴に残さない（macOS 標準の zsh の書き方。bash では `read -rsp "クライアントシークレット: " V`）:
    ```bash
@@ -65,6 +65,25 @@ Google Cloud はこのリポジトリの `main` のトークンだけを受け�
 | `GCP_REGION` / `CLOUD_RUN_SERVICE` | 任意。省略時は `asia-northeast1` / `google-health-mcp` |
 
 マージせずにデプロイしたいときは、`main` で Deploy ワークフローを手動実行する（Actions → Deploy → Run workflow）。
+
+## スコープ
+
+同意画面に登録するスコープは `src/constants.py` の `GOOGLE_HEALTH_SCOPES` が正。
+
+| スコープ | 用途 |
+| --- | --- |
+| `googlehealth.activity_and_fitness.readonly` | 活動量・ワークアウト・心拍 |
+| `googlehealth.sleep.readonly` | 睡眠 |
+| `googlehealth.health_metrics_and_measurements.readonly` | HRV・SpO2・皮膚温・VO2 Max・体重・体脂肪率 |
+| `googlehealth.nutrition.readonly` | 食事・水分の読み取り |
+| `googlehealth.nutrition.writeonly` | 食事・水分の記録・削除 |
+| `googlehealth.settings.readonly` | ペアリング済みデバイス |
+
+書き込みは食事・水分に限り、ほかの書き込みスコープは要求しない。
+
+`googlehealth.nutrition.readonly` は Google の公式なデータ型一覧には載っているが、ディスカバリドキュメントのスコープ一覧には無く、同意画面で付けられないことがある。その場合も書き込みスコープで読み取りはできるが、読めるのはこのサーバーが書いた記録だけで、Fitbit アプリで記録した食事は `get_nutrition_log` に出てこない。
+
+**スコープを追加したら refresh_token を取り直す。** refresh_token に許可されたスコープは発行時に固定されるため、既存のトークンのままでは食事・水分・デバイスのツールが 403 になる。同意画面にスコープを追加 → `scripts/refresh_google_token.sh --force`（または `python auth_setup.py --client-secret client_secret.json` を実行して Secret Manager に登録）→ デプロイ、の順で進める。同意画面では追加した権限の許可を求められる。
 
 ## Google のトークンの更新（同意画面が「テスト」のとき）
 

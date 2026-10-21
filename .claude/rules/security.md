@@ -45,4 +45,5 @@ if not hmac.compare_digest(passphrase, self._passphrase): ...
 ## Google 側の認証（`google_auth.py`）
 
 - refresh_token の失効（`google.auth.exceptions.RefreshError`）は `RefreshTokenExpiredError` にラップし、`auth_setup.py` の再実行が必要な旨をメッセージで明示する
-- 要求するスコープは読み取り専用（`.readonly`）のみ。書き込みスコープを追加しない
+- 要求するスコープは読み取り専用（`.readonly`）に加え、書き込みは `googlehealth.nutrition.writeonly` のみ。ほかの書き込みスコープを追加しない
+- 書き込み・削除できるデータ型は `NUTRITION_WRITABLE_DATA_TYPES` に限る。削除は利用者が渡した `name` からデータ型を決めるので、API を呼ぶ前に許可リストと照合する
