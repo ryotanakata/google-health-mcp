@@ -111,8 +111,8 @@ class HealthService:
 
     async def delete_nutrition_logs(self, names: list[str]) -> DeletedLogs:
         validated = self.parse_log_names(names)
-        await self._repository.delete_nutrition_data_points(validated)
-        return self.summarize_deleted_logs(validated)
+        completed = await self._repository.delete_nutrition_data_points(validated)
+        return self.summarize_deleted_logs(validated, completed)
 
     @staticmethod
     def _now() -> dt.datetime:
@@ -607,12 +607,15 @@ class HealthService:
         }
 
     @staticmethod
-    def summarize_deleted_logs(names: list[str]) -> DeletedLogs:
-        return {
-            "names": names,
-            "count": len(names),
-            "summary": f"食事・水分の記録を {len(names)} 件削除しました",
-        }
+    def summarize_deleted_logs(names: list[str], completed: bool) -> DeletedLogs:
+        """completed は Operation が完了したか。完了前は削除済みと言い切らない。"""
+        summary = (
+            f"食事・水分の記録を {len(names)} 件削除しました"
+            if completed
+            else f"食事・水分の記録 {len(names)} 件の削除を受け付けました"
+            "（完了前なので、消えたかは get_nutrition_log で確かめる）"
+        )
+        return {"names": names, "count": len(names), "summary": summary}
 
     @staticmethod
     def _logged_record(name: str | None, summary: str) -> LoggedRecord:

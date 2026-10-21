@@ -791,9 +791,15 @@ async def test_body_measurements_reversed_range_is_rejected():
 class FakeNutritionRepository:
     """食事・水分まわりの呼び出しだけを記録する。"""
 
-    def __init__(self, nutrition: dict | None = None, devices: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        nutrition: dict | None = None,
+        devices: list[dict] | None = None,
+        delete_completed: bool = True,
+    ) -> None:
         self.nutrition = nutrition or {}
         self.devices = devices or []
+        self.delete_completed = delete_completed
         self.calls: list[tuple] = []
 
     async def fetch_nutrition_log(self, day: dt.date) -> dict[str, list[dict]]:
@@ -819,8 +825,9 @@ class FakeNutritionRepository:
         self.calls.append(("create_hydration", amount_ml, start, end))
         return {"name": "users/me/dataTypes/hydration-log/dataPoints/w1"}
 
-    async def delete_nutrition_data_points(self, names: list[str]) -> None:
+    async def delete_nutrition_data_points(self, names: list[str]) -> bool:
         self.calls.append(("delete", names))
+        return self.delete_completed
 
 
 def _meal_point(name: str, food: str, hours: int, **nutrients: float) -> dict:
@@ -1211,3 +1218,23 @@ def test_parse_log_interval_crosses_midnight_at_the_end_of_the_day():
 
     assert start < end
     assert end == dt.datetime(2026, 2, 1, 0, 0, tzinfo=now.tzinfo)
+
+
+async def test_delete_nutrition_logs_does_not_claim_success_before_the_operation_finishes():
+    repository = FakeNutritionRepository(delete_completed=False)
+
+    result = await HealthService(repository).delete_nutrition_logs(
+        ["users/me/dataTypes/nutrition-log/dataPoints/a1"]
+    )
+
+    assert result["count"] == 1
+    assert "削除しました" not in result["summary"]
+    assert "get_nutrition_log" in result["summary"]
+
+
+async def test_delete_nutrition_logs_says_deleted_when_the_operation_finished():
+    result = await HealthService(FakeNutritionRepository()).delete_nutrition_logs(
+        ["users/me/dataTypes/nutrition-log/dataPoints/a1"]
+    )
+
+    assert "削除しました" in result["summary"]

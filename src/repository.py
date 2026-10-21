@@ -197,19 +197,30 @@ class HealthRepository:
     ) -> list[dict]:
         """品目ごとに1件ずつ作成し、作成されたデータポイントを items と同じ順で返す。
 
-        create は1件ずつしか受け付けないため、品目の数だけ直列に送る。
+        create は1件ずつしか受け付けないため、品目の数だけ直列に送る。途中で失敗しても
+        書き込み済みの記録は消えないので、何件目まで書けたかをエラーに載せる。
         """
         interval = self._session_interval(start, end)
         created: list[dict] = []
         async with self._client() as client:
             for item in items:
-                operation = await self._request(
-                    client,
-                    "POST",
-                    "/dataTypes/nutrition-log/dataPoints",
-                    json={"nutritionLog": self._nutrition_log(item, meal_type, interval)},
-                )
-                created.append(self._operation_response(operation))
+                try:
+                    operation = await self._request(
+                        client,
+                        "POST",
+                        "/dataTypes/nutrition-log/dataPoints",
+                        json={"nutritionLog": self._nutrition_log(item, meal_type, interval)},
+                    )
+                    created.append(self._operation_response(operation))
+                except HealthApiError as exc:
+                    if not created:
+                        raise
+                    # スコープ不足（InsufficientScopeError）などの区別が消えないよう同じ型で包む
+                    raise type(exc)(
+                        f"{len(items)}品目のうち{len(created)}品目を記録したあとで失敗しました。"
+                        "記録済みの分は消えないので、二重に記録しないよう get_nutrition_log で"
+                        f"確かめてから記録し直してください: {exc}"
+                    ) from exc
         return created
 
     async def create_hydration_log(
@@ -229,8 +240,11 @@ class HealthRepository:
             )
         return self._operation_response(operation)
 
-    async def delete_nutrition_data_points(self, names: list[str]) -> None:
-        """batchDelete は parent と name の親が一致している必要があるため、データ型ごとに送る。"""
+    async def delete_nutrition_data_points(self, names: list[str]) -> bool:
+        """削除が完了したか（Operation の done）を返す。
+
+        batchDelete は parent と name の親が一致している必要があるため、データ型ごとに送る。
+        """
         by_data_type: dict[str, list[str]] = {}
         for name in names:
             data_type = self.data_point_data_type(name)
@@ -239,6 +253,7 @@ class HealthRepository:
             if data_type not in NUTRITION_WRITABLE_DATA_TYPES:
                 raise HealthApiError(f"削除できないデータ型のnameです: {name!r}")
             by_data_type.setdefault(data_type, []).append(name)
+        completed = True
         async with self._client() as client:
             for data_type, data_point_names in by_data_type.items():
                 operation = await self._request(
@@ -248,6 +263,8 @@ class HealthRepository:
                     json={"names": data_point_names},
                 )
                 self._operation_response(operation)
+                completed = completed and bool(operation.get("done"))
+        return completed
 
     @staticmethod
     def data_point_data_type(name: str) -> str | None:
@@ -283,18 +300,19 @@ class HealthRepository:
         json: dict | None = None,
     ) -> dict:
         response = await client.request(method, path, params=params, json=json)
-        body = response.text[:HEALTH_API_MAX_ERROR_BODY_CHARS]
         # access_token は毎回 refresh_token から発行し直すため、403 は権限不足。付与済みの
         # スコープは refresh_token に固定されるので、スコープを増やしたあとは取り直しが要る
         if response.status_code == httpx.codes.FORBIDDEN:
             raise InsufficientScopeError(
                 "Google Health APIへのアクセスが拒否されました（403）。refresh_tokenに必要な"
                 "スコープが付いていない可能性があります。OAuth同意画面にスコープを追加し、"
-                f"auth_setup.pyを再実行してrefresh_tokenを取り直してください: {body}"
+                "auth_setup.pyを再実行してrefresh_tokenを取り直してください: "
+                f"{response.text[:HEALTH_API_MAX_ERROR_BODY_CHARS]}"
             )
         if response.status_code >= 400:
             raise HealthApiError(
-                f"Google Health API呼び出しに失敗しました: {response.status_code} {body}"
+                f"Google Health API呼び出しに失敗しました: {response.status_code} "
+                f"{response.text[:HEALTH_API_MAX_ERROR_BODY_CHARS]}"
             )
         return response.json()
 

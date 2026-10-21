@@ -654,3 +654,127 @@ async def test_forbidden_on_write_is_an_api_error(repository):
             _jst(2026, 1, 31, 12, 30),
             _jst(2026, 1, 31, 12, 31),
         )
+
+
+@respx.mock
+async def test_create_nutrition_logs_reports_how_many_items_were_written(repository):
+    """匿名記録は編集できないので、途中で失敗したら二重登録を避ける手がかりを返す。"""
+    respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints").mock(
+        side_effect=[
+            Response(
+                200, json=_operation({"name": "users/me/dataTypes/nutrition-log/dataPoints/a1"})
+            ),
+            Response(400, json={"error": {"message": "invalid energy"}}),
+        ]
+    )
+
+    with pytest.raises(HealthApiError, match="2品目のうち1品目") as error:
+        await repository.create_nutrition_logs(
+            "DINNER",
+            [
+                {"food_name": "カレー", "energy_kcal": 700.0},
+                {"food_name": "サラダ", "energy_kcal": -1.0},
+            ],
+            _jst(2026, 1, 31, 19, 0),
+            _jst(2026, 1, 31, 19, 1),
+        )
+
+    assert "get_nutrition_log" in str(error.value)
+
+
+@respx.mock
+async def test_create_nutrition_logs_raises_as_is_when_the_first_item_fails(repository):
+    respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints").mock(
+        return_value=Response(400, json={"error": {"message": "invalid energy"}})
+    )
+
+    with pytest.raises(HealthApiError) as error:
+        await repository.create_nutrition_logs(
+            "DINNER",
+            [{"food_name": "カレー", "energy_kcal": 700.0}],
+            _jst(2026, 1, 31, 19, 0),
+            _jst(2026, 1, 31, 19, 1),
+        )
+
+    assert "品目のうち" not in str(error.value)
+
+
+@respx.mock
+async def test_delete_nutrition_data_points_reports_whether_the_operation_finished(repository):
+    route = respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints:batchDelete").mock(
+        return_value=Response(200, json={"name": "operations/1", "done": False})
+    )
+
+    completed = await repository.delete_nutrition_data_points(
+        ["users/me/dataTypes/nutrition-log/dataPoints/a1"]
+    )
+
+    assert completed is False
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_delete_nutrition_data_points_is_complete_when_every_operation_is_done(repository):
+    respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints:batchDelete").mock(
+        return_value=Response(200, json={"done": True, "response": {}})
+    )
+    respx.post(f"{DATA_TYPES}/hydration-log/dataPoints:batchDelete").mock(
+        return_value=Response(200, json={"done": True, "response": {}})
+    )
+
+    completed = await repository.delete_nutrition_data_points(
+        [
+            "users/me/dataTypes/nutrition-log/dataPoints/a1",
+            "users/me/dataTypes/hydration-log/dataPoints/w1",
+        ]
+    )
+
+    assert completed is True
+
+
+@respx.mock
+async def test_delete_nutrition_data_points_is_incomplete_when_one_data_type_is_unfinished(
+    repository,
+):
+    respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints:batchDelete").mock(
+        return_value=Response(200, json={"done": True, "response": {}})
+    )
+    # proto3 JSON は値 false を省略するので、done が欠けていれば未完了
+    respx.post(f"{DATA_TYPES}/hydration-log/dataPoints:batchDelete").mock(
+        return_value=Response(200, json={"name": "operations/1"})
+    )
+
+    completed = await repository.delete_nutrition_data_points(
+        [
+            "users/me/dataTypes/nutrition-log/dataPoints/a1",
+            "users/me/dataTypes/hydration-log/dataPoints/w1",
+        ]
+    )
+
+    assert completed is False
+
+
+@respx.mock
+async def test_partial_write_keeps_the_insufficient_scope_error_type(repository):
+    """包み直しても 403 の案内が別の例外型に化けないこと。"""
+    respx.post(f"{DATA_TYPES}/nutrition-log/dataPoints").mock(
+        side_effect=[
+            Response(
+                200, json=_operation({"name": "users/me/dataTypes/nutrition-log/dataPoints/a1"})
+            ),
+            Response(403, json={}),
+        ]
+    )
+
+    with pytest.raises(InsufficientScopeError, match="2品目のうち1品目") as error:
+        await repository.create_nutrition_logs(
+            "DINNER",
+            [
+                {"food_name": "カレー", "energy_kcal": 700.0},
+                {"food_name": "サラダ", "energy_kcal": 50.0},
+            ],
+            _jst(2026, 1, 31, 19, 0),
+            _jst(2026, 1, 31, 19, 1),
+        )
+
+    assert "auth_setup.py" in str(error.value)
