@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from mcp.types import ToolAnnotations
+
 # --- 環境変数の検証（config.py） ---
 
 # トークン署名鍵の最短長。署名済みの client_id は誰でも登録で入手でき、鍵をオフラインで
@@ -9,17 +11,27 @@ OAUTH_SIGNING_KEY_MIN_LENGTH = 32
 # --- MCP サーバー（main.py） ---
 
 MCP_PATH = "/mcp"
+# ツールが読み取りだけか、書き込み・削除を伴うかを Claude に伝える注釈（mcp-tools.md）
+MCP_READ_ONLY_TOOL = ToolAnnotations(read_only_hint=True)
+MCP_WRITE_TOOL = ToolAnnotations(read_only_hint=False)
+MCP_DESTRUCTIVE_TOOL = ToolAnnotations(read_only_hint=False, destructive_hint=True)
 # Claude.ai はブラウザ経由ではなくサーバー側から接続するが、Origin を付けてきた場合に備えて許可する
 CLAUDE_ORIGIN = "https://claude.ai"
 
 # --- Google 側の認証（google_auth.py・auth_setup.py） ---
 
 GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
-# スコープ名は googlehealth. で始まる（health.steps.readonly のような名前は存在しない）
+# スコープ名は googlehealth. で始まる（health.steps.readonly のような名前は存在しない）。
+# 書き込みは食事・水分の nutrition.writeonly のみ（architecture.md の不変条件）。
+# nutrition.readonly は公式のデータ型一覧にはあるがディスカバリドキュメントのスコープ一覧には
+# 無く、同意画面で付けられないことがある。付かない場合に読めるのは、このサーバーが書いた記録だけ
 GOOGLE_HEALTH_SCOPES = [
     "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
     "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
     "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+    "https://www.googleapis.com/auth/googlehealth.nutrition.readonly",
+    "https://www.googleapis.com/auth/googlehealth.nutrition.writeonly",
+    "https://www.googleapis.com/auth/googlehealth.settings.readonly",
 ]
 # auth_setup.py --token-only で、ブラウザでの許可を待つ上限
 GOOGLE_REAUTH_TIMEOUT_SECONDS = 10 * 60
@@ -39,11 +51,24 @@ BODY_MEASUREMENTS_MAX_DAYS = 90
 # これより長くするとリクエスト数に比例して応答が遅れる
 ACTIVITY_TREND_MAX_DAYS = 90
 
+# --- 食事・水分の記録（service.py） ---
+
+# 記録の現地時刻を解釈するタイムゾーン。API の interval は UTC と UTC オフセットを要求するため、
+# date・time の省略時の現在時刻と、指定された日時のオフセットをこのタイムゾーンで決める
+NUTRITION_LOG_TIME_ZONE = "Asia/Tokyo"
+# API は interval に startTime < endTime を要求する。食事・水分は時点の記録なので最小の幅を置く
+NUTRITION_LOG_INTERVAL_MINUTES = 1
+# log_meal で受け付ける NutritionLog.mealType。API の enum にはこのほかに BEFORE_BREAKFAST・
+# ANYTIME などもあるが、Claude が選び分けられる4区分に絞る
+NUTRITION_MEAL_TYPES = ("BREAKFAST", "LUNCH", "DINNER", "SNACK")
+# 書き込み・削除を許可するデータ型（architecture.md の不変条件）
+NUTRITION_WRITABLE_DATA_TYPES = ("nutrition-log", "hydration-log")
+
 # --- Google Health API（repository.py） ---
 
-# データポイント系エンドポイントの起点。
+# 利用者のリソースの起点。データポイント（/dataTypes/...）もデバイス（/pairedDevices）もこの下。
 # 公式ディスカバリドキュメント: https://health.googleapis.com/$discovery/rest?version=v4
-HEALTH_API_BASE_URL = "https://health.googleapis.com/v4/users/me/dataTypes"
+HEALTH_API_BASE_URL = "https://health.googleapis.com/v4/users/me"
 # 1リクエストあたりのクエリ期間上限。
 # heart-rate / active-minutes / total-calories / calories-in-heart-rate-zone は14日、それ以外は90日
 QUERY_MAX_DAYS = 90
@@ -122,8 +147,8 @@ $body
 </html>"""
 
 # パスフレーズの入力フォーム。$error_html は空文字か LOGIN_ERROR_TEMPLATE を展開したもの
-LOGIN_FORM_TEMPLATE = """<p>Claude があなたの健康データ（読み取り専用）へのアクセスを求めています。
-許可する場合はパスフレーズ（MCP_SHARED_SECRET）を入力してください。</p>
+LOGIN_FORM_TEMPLATE = """<p>Claude があなたの健康データの読み取りと、食事・水分の記録・削除への
+アクセスを求めています。許可する場合はパスフレーズ（MCP_SHARED_SECRET）を入力してください。</p>
 $error_html
 <form method="post" action="$action">
   <input type="hidden" name="request" value="$login_request">

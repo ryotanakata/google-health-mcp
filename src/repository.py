@@ -16,6 +16,7 @@ from src.constants import (
     HEALTH_API_BASE_URL,
     HEALTH_API_MAX_ERROR_BODY_CHARS,
     HEALTH_API_TIMEOUT_SECONDS,
+    NUTRITION_WRITABLE_DATA_TYPES,
     QUERY_MAX_DAYS,
     QUERY_SHORT_MAX_DAYS,
     SESSION_PAGE_SIZE,
@@ -24,6 +25,10 @@ from src.google_auth import GoogleAuthManager
 
 
 class HealthApiError(RuntimeError):
+    pass
+
+
+class InsufficientScopeError(HealthApiError):
     pass
 
 
@@ -150,6 +155,110 @@ class HealthRepository:
                 )
         return points
 
+    async def fetch_nutrition_log(self, day: dt.date) -> dict[str, list[dict]]:
+        """day の食事・水分の記録（list）と、その日の合計（dailyRollUp）を返す。"""
+        next_day = day + dt.timedelta(days=1)
+        async with self._client() as client:
+            meals, hydration, meal_totals, hydration_totals = await asyncio.gather(
+                self._list(
+                    client,
+                    "nutrition-log",
+                    self._session_date_filter("nutrition-log", day, next_day),
+                ),
+                self._list(
+                    client,
+                    "hydration-log",
+                    self._session_date_filter("hydration-log", day, next_day),
+                ),
+                self._daily_rollup(client, "nutrition-log", day, day),
+                self._daily_rollup(client, "hydration-log", day, day),
+            )
+        return {
+            "nutrition-log": meals,
+            "hydration-log": hydration,
+            "nutrition-log-rollup": meal_totals,
+            "hydration-log-rollup": hydration_totals,
+        }
+
+    async def fetch_paired_devices(self) -> list[dict]:
+        devices: list[dict] = []
+        params: dict = {}
+        async with self._client() as client:
+            while True:
+                raw = await self._request(client, "GET", "/pairedDevices", params=params)
+                devices.extend(raw.get("pairedDevices", []))
+                next_page_token = raw.get("nextPageToken")
+                if not next_page_token:
+                    return devices
+                params = {**params, "pageToken": next_page_token}
+
+    async def create_nutrition_logs(
+        self, meal_type: str, items: list[dict], start: dt.datetime, end: dt.datetime
+    ) -> list[dict]:
+        """品目ごとに1件ずつ作成し、作成されたデータポイントを items と同じ順で返す。
+
+        create は1件ずつしか受け付けないため、品目の数だけ直列に送る。
+        """
+        interval = self._session_interval(start, end)
+        created: list[dict] = []
+        async with self._client() as client:
+            for item in items:
+                operation = await self._request(
+                    client,
+                    "POST",
+                    "/dataTypes/nutrition-log/dataPoints",
+                    json={"nutritionLog": self._nutrition_log(item, meal_type, interval)},
+                )
+                created.append(self._operation_response(operation))
+        return created
+
+    async def create_hydration_log(
+        self, amount_ml: float, start: dt.datetime, end: dt.datetime
+    ) -> dict:
+        async with self._client() as client:
+            operation = await self._request(
+                client,
+                "POST",
+                "/dataTypes/hydration-log/dataPoints",
+                json={
+                    "hydrationLog": {
+                        "interval": self._session_interval(start, end),
+                        "amountConsumed": {"milliliters": amount_ml},
+                    }
+                },
+            )
+        return self._operation_response(operation)
+
+    async def delete_nutrition_data_points(self, names: list[str]) -> None:
+        """batchDelete は parent と name の親が一致している必要があるため、データ型ごとに送る。"""
+        by_data_type: dict[str, list[str]] = {}
+        for name in names:
+            data_type = self.data_point_data_type(name)
+            # 書き込めるデータ型以外へパスを組み立てないための歯止め（architecture.md の不変条件）。
+            # 利用者に返す入力エラーは service が先に出す
+            if data_type not in NUTRITION_WRITABLE_DATA_TYPES:
+                raise HealthApiError(f"削除できないデータ型のnameです: {name!r}")
+            by_data_type.setdefault(data_type, []).append(name)
+        async with self._client() as client:
+            for data_type, data_point_names in by_data_type.items():
+                operation = await self._request(
+                    client,
+                    "POST",
+                    f"/dataTypes/{data_type}/dataPoints:batchDelete",
+                    json={"names": data_point_names},
+                )
+                self._operation_response(operation)
+
+    @staticmethod
+    def data_point_data_type(name: str) -> str | None:
+        """name の形式は users/{user}/dataTypes/{data_type}/dataPoints/{data_point}。"""
+        parts = name.split("/")
+        if len(parts) != 6 or parts[0] != "users" or parts[2] != "dataTypes":
+            return None
+        if parts[4] != "dataPoints" or not parts[5]:
+            return None
+        return parts[3]
+
     @contextlib.asynccontextmanager
     async def _client(self) -> AsyncIterator[httpx.AsyncClient]:
         """fetch_* 1回分の並列・ページング・分割リクエストで接続を共有するクライアント。
@@ -174,10 +283,18 @@ class HealthRepository:
         json: dict | None = None,
     ) -> dict:
         response = await client.request(method, path, params=params, json=json)
+        body = response.text[:HEALTH_API_MAX_ERROR_BODY_CHARS]
+        # access_token は毎回 refresh_token から発行し直すため、403 は権限不足。付与済みの
+        # スコープは refresh_token に固定されるので、スコープを増やしたあとは取り直しが要る
+        if response.status_code == httpx.codes.FORBIDDEN:
+            raise InsufficientScopeError(
+                "Google Health APIへのアクセスが拒否されました（403）。refresh_tokenに必要な"
+                "スコープが付いていない可能性があります。OAuth同意画面にスコープを追加し、"
+                f"auth_setup.pyを再実行してrefresh_tokenを取り直してください: {body}"
+            )
         if response.status_code >= 400:
             raise HealthApiError(
-                f"Google Health API呼び出しに失敗しました: {response.status_code} "
-                f"{response.text[:HEALTH_API_MAX_ERROR_BODY_CHARS]}"
+                f"Google Health API呼び出しに失敗しました: {response.status_code} {body}"
             )
         return response.json()
 
@@ -196,7 +313,7 @@ class HealthRepository:
         points: list[dict] = []
         while True:
             raw = await HealthRepository._request(
-                client, "POST", f"/{data_type}/dataPoints:dailyRollUp", json=body
+                client, "POST", f"/dataTypes/{data_type}/dataPoints:dailyRollUp", json=body
             )
             points.extend(raw.get("rollupDataPoints", []))
             next_page_token = raw.get("nextPageToken")
@@ -251,6 +368,68 @@ class HealthRepository:
         return points
 
     @staticmethod
+    def _session_date_filter(data_type: str, start: dt.date, exclusive_end: dt.date) -> str:
+        """セッションの日付 filter。filter ではデータ型名をアンダースコアで書く。"""
+        field = f"{data_type.replace('-', '_')}.interval.civil_start_time"
+        return f'{field} >= "{start.isoformat()}" AND {field} < "{exclusive_end.isoformat()}"'
+
+    @staticmethod
+    def _session_interval(start: dt.datetime, end: dt.datetime) -> dict:
+        """SessionTimeInterval。開始・終了（UTC）と現地時刻のオフセットがいずれも必須。"""
+        return {
+            "startTime": HealthRepository._utc_timestamp(start),
+            "endTime": HealthRepository._utc_timestamp(end),
+            "startUtcOffset": HealthRepository._utc_offset(start),
+            "endUtcOffset": HealthRepository._utc_offset(end),
+        }
+
+    @staticmethod
+    def _utc_timestamp(value: dt.datetime) -> str:
+        """google.protobuf.Timestamp の JSON 表現（"2026-01-31T03:00:00Z"）。"""
+        return value.astimezone(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @staticmethod
+    def _utc_offset(value: dt.datetime) -> str:
+        """google.protobuf.Duration の JSON 表現（"32400s"）。"""
+        offset = value.utcoffset() or dt.timedelta()
+        return f"{int(offset.total_seconds())}s"
+
+    @staticmethod
+    def _nutrition_log(item: dict, meal_type: str, interval: dict) -> dict:
+        """匿名方式（foodDisplayName と栄養素を直接指定）の NutritionLog。
+
+        たんぱく質だけは nutrients の PROTEIN で、脂質・炭水化物は専用のフィールドで渡す。
+        """
+        log: dict = {
+            "interval": interval,
+            "mealType": meal_type,
+            "foodDisplayName": item["food_name"],
+            "energy": {"kcal": item["energy_kcal"]},
+        }
+        if item.get("protein_g") is not None:
+            log["nutrients"] = [{"nutrient": "PROTEIN", "quantity": {"grams": item["protein_g"]}}]
+        if item.get("fat_g") is not None:
+            log["totalFat"] = {"grams": item["fat_g"]}
+        if item.get("carbohydrate_g") is not None:
+            log["totalCarbohydrate"] = {"grams": item["carbohydrate_g"]}
+        return log
+
+    @staticmethod
+    def _operation_response(operation: dict) -> dict:
+        """create・batchDelete が返す Operation から、作成されたデータポイントを取り出す。
+
+        HTTP が 200 でも Operation.error に失敗が入る。done が false のうちは response が
+        返らないので、作成された記録を特定できないまま空になる。
+        """
+        error = operation.get("error", {})
+        if error:
+            raise HealthApiError(
+                f"Google Health APIの書き込みに失敗しました: {error.get('code')} "
+                f"{error.get('message', '')}"
+            )
+        return operation.get("response", {})
+
+    @staticmethod
     def _daily_date_filter(data_type: str, start: dt.date, exclusive_end: dt.date) -> str:
         """日次サマリーの日付 filter。filter ではデータ型名をアンダースコアで書く。"""
         field = f"{data_type.replace('-', '_')}.date"
@@ -266,7 +445,7 @@ class HealthRepository:
             params["pageSize"] = page_size
         while True:
             raw = await HealthRepository._request(
-                client, "GET", f"/{data_type}/dataPoints", params=params
+                client, "GET", f"/dataTypes/{data_type}/dataPoints", params=params
             )
             points.extend(raw.get("dataPoints", []))
             next_page_token = raw.get("nextPageToken")

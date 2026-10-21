@@ -786,3 +786,428 @@ async def test_body_measurements_reversed_range_is_rejected():
     with pytest.raises(ValueError, match="^start_date には end_date 以前の日付を指定してください$"):
         await HealthService(repository).get_body_measurements("2026-02-01", "2026-01-01")
     assert repository.calls == []
+
+
+class FakeNutritionRepository:
+    """食事・水分まわりの呼び出しだけを記録する。"""
+
+    def __init__(self, nutrition: dict | None = None, devices: list[dict] | None = None) -> None:
+        self.nutrition = nutrition or {}
+        self.devices = devices or []
+        self.calls: list[tuple] = []
+
+    async def fetch_nutrition_log(self, day: dt.date) -> dict[str, list[dict]]:
+        self.calls.append(("nutrition_log", day))
+        return self.nutrition
+
+    async def fetch_paired_devices(self) -> list[dict]:
+        self.calls.append(("paired_devices",))
+        return self.devices
+
+    async def create_nutrition_logs(
+        self, meal_type: str, items: list[dict], start: dt.datetime, end: dt.datetime
+    ) -> list[dict]:
+        self.calls.append(("create_nutrition", meal_type, items, start, end))
+        return [
+            {"name": f"users/me/dataTypes/nutrition-log/dataPoints/a{index}"}
+            for index, _ in enumerate(items)
+        ]
+
+    async def create_hydration_log(
+        self, amount_ml: float, start: dt.datetime, end: dt.datetime
+    ) -> dict:
+        self.calls.append(("create_hydration", amount_ml, start, end))
+        return {"name": "users/me/dataTypes/hydration-log/dataPoints/w1"}
+
+    async def delete_nutrition_data_points(self, names: list[str]) -> None:
+        self.calls.append(("delete", names))
+
+
+def _meal_point(name: str, food: str, hours: int, **nutrients: float) -> dict:
+    log: dict = {
+        "foodDisplayName": food,
+        "mealType": "LUNCH",
+        "interval": {"civilStartTime": _civil(2026, 1, 31, hours=hours)},
+        "energy": {"kcal": nutrients.get("kcal", 0.0)},
+    }
+    if "protein" in nutrients:
+        log["nutrients"] = [{"nutrient": "PROTEIN", "quantity": {"grams": nutrients["protein"]}}]
+    if "fat" in nutrients:
+        log["totalFat"] = {"grams": nutrients["fat"]}
+    if "carbohydrate" in nutrients:
+        log["totalCarbohydrate"] = {"grams": nutrients["carbohydrate"]}
+    return {"name": name, "nutritionLog": log}
+
+
+def test_parse_meal_type_accepts_the_four_meal_types():
+    assert HealthService.parse_meal_type("lunch") == "LUNCH"
+    assert HealthService.parse_meal_type("SNACK") == "SNACK"
+
+
+@pytest.mark.parametrize("value", ["ANYTIME", "BEFORE_LUNCH", "brunch", ""])
+def test_parse_meal_type_rejects_other_values(value):
+    with pytest.raises(ValueError, match="meal_type"):
+        HealthService.parse_meal_type(value)
+
+
+def test_parse_log_interval_uses_now_when_omitted():
+    now = dt.datetime(2026, 1, 31, 12, 30, 45, 123, tzinfo=dt.timezone(dt.timedelta(hours=9)))
+
+    start, end = HealthService.parse_log_interval(None, None, now)
+
+    assert start == dt.datetime(2026, 1, 31, 12, 30, 45, tzinfo=now.tzinfo)
+    # API は startTime < endTime を要求する
+    assert start < end
+    assert (end - start) == dt.timedelta(minutes=1)
+
+
+def test_parse_log_interval_uses_the_given_date_and_time():
+    now = dt.datetime(2026, 1, 31, 12, 30, tzinfo=dt.timezone(dt.timedelta(hours=9)))
+
+    start, end = HealthService.parse_log_interval("2026-01-01", "07:15", now)
+
+    assert start == dt.datetime(2026, 1, 1, 7, 15, tzinfo=now.tzinfo)
+    assert end == dt.datetime(2026, 1, 1, 7, 16, tzinfo=now.tzinfo)
+
+
+@pytest.mark.parametrize("value", ["7時", "25:00", "07:15+09:00", ""])
+def test_parse_time_rejects_other_formats(value):
+    with pytest.raises(ValueError, match="時刻"):
+        HealthService.parse_time(value)
+
+
+def test_parse_meal_items_requires_a_food_name_and_energy():
+    with pytest.raises(ValueError, match="items"):
+        HealthService.parse_meal_items([])
+    with pytest.raises(ValueError, match="food_name"):
+        HealthService.parse_meal_items([{"food_name": "  ", "energy_kcal": 1.0}])
+    with pytest.raises(ValueError, match="energy_kcal"):
+        HealthService.parse_meal_items([{"food_name": "丼"}])
+
+
+def test_parse_meal_items_rejects_negative_values():
+    with pytest.raises(ValueError, match="protein_g"):
+        HealthService.parse_meal_items(
+            [{"food_name": "丼", "energy_kcal": 600.0, "protein_g": -1.0}]
+        )
+
+
+def test_parse_meal_items_keeps_missing_macros_as_none():
+    items = HealthService.parse_meal_items([{"food_name": " 親子丼 ", "energy_kcal": 600}])
+
+    assert items == [
+        {
+            "food_name": "親子丼",
+            "energy_kcal": 600.0,
+            "protein_g": None,
+            "fat_g": None,
+            "carbohydrate_g": None,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "users/me/dataTypes/sleep/dataPoints/s1",
+        "users/me/dataTypes/weight/dataPoints/w1",
+        "users/me/dataTypes/nutrition-log/dataPoints",
+        "nutrition-log",
+    ],
+)
+async def test_delete_nutrition_logs_rejects_other_data_types_without_calling_the_api(name):
+    repository = FakeNutritionRepository()
+    service = HealthService(repository)
+
+    with pytest.raises(ValueError, match="削除できるのは"):
+        await service.delete_nutrition_logs([name])
+
+    assert repository.calls == []
+
+
+async def test_delete_nutrition_logs_requires_a_name():
+    repository = FakeNutritionRepository()
+
+    with pytest.raises(ValueError, match="names"):
+        await HealthService(repository).delete_nutrition_logs([])
+
+    assert repository.calls == []
+
+
+async def test_delete_nutrition_logs_deletes_meals_and_hydration():
+    repository = FakeNutritionRepository()
+    names = [
+        "users/me/dataTypes/nutrition-log/dataPoints/a1",
+        "users/me/dataTypes/hydration-log/dataPoints/w1",
+    ]
+
+    result = await HealthService(repository).delete_nutrition_logs(names)
+
+    assert repository.calls == [("delete", names)]
+    assert result["count"] == 2
+    assert result["names"] == names
+    assert "2 件" in result["summary"]
+
+
+async def test_log_meal_records_every_item_in_one_call():
+    repository = FakeNutritionRepository()
+
+    result = await HealthService(repository).log_meal(
+        "lunch",
+        [
+            {"food_name": "親子丼", "energy_kcal": 600, "protein_g": 30, "carbohydrate_g": 80},
+            {"food_name": "サラダ", "energy_kcal": 50},
+        ],
+        date="2026-01-31",
+        time="12:30",
+    )
+
+    _, meal_type, items, start, end = repository.calls[0]
+    assert meal_type == "LUNCH"
+    assert [item["food_name"] for item in items] == ["親子丼", "サラダ"]
+    assert start < end
+    assert result["total_energy_kcal"] == 650.0
+    assert result["logged_at"] == "2026-01-31T12:30"
+    assert [record["name"] for record in result["records"]] == [
+        "users/me/dataTypes/nutrition-log/dataPoints/a0",
+        "users/me/dataTypes/nutrition-log/dataPoints/a1",
+    ]
+    assert result["records"][0]["summary"] == "親子丼 600 kcal（P 30g / C 80g）"
+    assert result["records"][1]["summary"] == "サラダ 50 kcal"
+    assert "LUNCH" in result["summary"]
+
+
+async def test_log_water_records_milliliters():
+    repository = FakeNutritionRepository()
+
+    result = await HealthService(repository).log_water(500, date="2026-01-31", time="15:00")
+
+    assert repository.calls[0][:2] == ("create_hydration", 500.0)
+    assert result["record"]["name"] == "users/me/dataTypes/hydration-log/dataPoints/w1"
+    assert result["logged_at"] == "2026-01-31T15:00"
+    assert "500 ml" in result["summary"]
+
+
+async def test_log_water_rejects_a_negative_amount():
+    repository = FakeNutritionRepository()
+
+    with pytest.raises(ValueError, match="amount_ml"):
+        await HealthService(repository).log_water(-1)
+
+    assert repository.calls == []
+
+
+def test_summarize_nutrition_log_returns_totals_and_entries():
+    result = HealthService.summarize_nutrition_log(
+        "2026-01-31",
+        {
+            "nutrition-log": [
+                _meal_point("…/a2", "サラダ", 13, kcal=50.0),
+                _meal_point("…/a1", "親子丼", 12, kcal=600.0, protein=30.0, fat=15.0,
+                            carbohydrate=80.0),
+            ],
+            "hydration-log": [
+                {
+                    "name": "…/w1",
+                    "hydrationLog": {
+                        "interval": {"civilStartTime": _civil(2026, 1, 31, hours=15)},
+                        "amountConsumed": {"milliliters": 500.0},
+                    },
+                }
+            ],
+            "nutrition-log-rollup": [
+                {
+                    "nutritionLog": {
+                        "energy": {"kcalSum": 650.0},
+                        "nutrients": [{"nutrient": "PROTEIN", "quantity": {"gramsSum": 30.0}}],
+                        "totalFat": {"gramsSum": 15.0},
+                        "totalCarbohydrate": {"gramsSum": 80.0},
+                    }
+                }
+            ],
+            "hydration-log-rollup": [
+                {"hydrationLog": {"amountConsumed": {"millilitersSum": 1500.0}}}
+            ],
+        },
+    )
+
+    assert result["totals"] == {
+        "energy_kcal": 650.0,
+        "protein_g": 30.0,
+        "fat_g": 15.0,
+        "carbohydrate_g": 80.0,
+        "water_ml": 1500.0,
+    }
+    # 時刻の早い順に並べ、削除に使う name を残すこと
+    assert [entry["food_name"] for entry in result["meals"]] == ["親子丼", "サラダ"]
+    assert result["meals"][0]["name"] == "…/a1"
+    assert result["meals"][0]["time"] == "2026-01-31T12:00"
+    assert result["meals"][0]["protein_g"] == 30.0
+    assert result["meals"][1]["protein_g"] is None
+    assert result["hydration"] == [
+        {"name": "…/w1", "time": "2026-01-31T15:00", "amount_ml": 500.0}
+    ]
+
+
+def test_summarize_nutrition_log_without_records():
+    result = HealthService.summarize_nutrition_log("2026-01-31", {})
+
+    assert result["meals"] == []
+    assert result["hydration"] == []
+    assert result["totals"] == {
+        "energy_kcal": None,
+        "protein_g": None,
+        "fat_g": None,
+        "carbohydrate_g": None,
+        "water_ml": None,
+    }
+
+
+def test_summarize_devices_omits_the_mac_address():
+    result = HealthService.summarize_devices(
+        [
+            {
+                "deviceVersion": "Google Fitbit Air",
+                "deviceType": "TRACKER",
+                "batteryStatus": "High",
+                "batteryLevel": 85,
+                "lastSyncTime": "2026-01-31T08:00:00Z",
+                "macAddress": "AA:BB:CC:DD:EE:FF",
+                "features": ["ACTIVE_MINUTES"],
+            }
+        ]
+    )
+
+    assert result["count"] == 1
+    assert result["devices"] == [
+        {
+            "device_version": "Google Fitbit Air",
+            "device_type": "TRACKER",
+            "battery_status": "High",
+            "battery_level": 85,
+            "last_sync_time": "2026-01-31T08:00:00Z",
+        }
+    ]
+
+
+def test_summarize_devices_without_devices():
+    assert HealthService.summarize_devices([]) == {"devices": [], "count": 0}
+
+
+async def test_get_nutrition_log_parses_the_date_and_summarizes():
+    repository = FakeNutritionRepository(
+        nutrition={
+            "nutrition-log": [_meal_point("…/a1", "親子丼", 12, kcal=600.0)],
+            "nutrition-log-rollup": [{"nutritionLog": {"energy": {"kcalSum": 600.0}}}],
+        }
+    )
+
+    result = await HealthService(repository).get_nutrition_log("2026-01-31")
+
+    assert repository.calls == [("nutrition_log", dt.date(2026, 1, 31))]
+    assert result["date"] == "2026-01-31"
+    assert result["totals"]["energy_kcal"] == 600.0
+    assert [entry["food_name"] for entry in result["meals"]] == ["親子丼"]
+
+
+async def test_get_nutrition_log_rejects_an_invalid_date_without_calling_the_api():
+    repository = FakeNutritionRepository()
+
+    with pytest.raises(ValueError, match="日付"):
+        await HealthService(repository).get_nutrition_log("2026/01/31")
+
+    assert repository.calls == []
+
+
+async def test_get_devices_summarizes_the_paired_devices():
+    repository = FakeNutritionRepository(
+        devices=[{"deviceVersion": "Google Fitbit Air", "macAddress": "AA:BB:CC:DD:EE:FF"}]
+    )
+
+    result = await HealthService(repository).get_devices()
+
+    assert repository.calls == [("paired_devices",)]
+    assert result["count"] == 1
+    assert result["devices"][0]["device_version"] == "Google Fitbit Air"
+    assert "macAddress" not in result["devices"][0]
+
+
+@pytest.mark.parametrize("date, time", [("2026/01/31", None), (None, "12時")])
+async def test_log_meal_rejects_an_invalid_date_or_time_without_calling_the_api(date, time):
+    repository = FakeNutritionRepository()
+
+    with pytest.raises(ValueError):
+        await HealthService(repository).log_meal(
+            "LUNCH", [{"food_name": "丼", "energy_kcal": 600}], date=date, time=time
+        )
+
+    assert repository.calls == []
+
+
+async def test_log_meal_tells_how_to_find_the_name_when_the_operation_is_unfinished():
+    class UnfinishedRepository(FakeNutritionRepository):
+        async def create_nutrition_logs(self, meal_type, items, start, end):
+            self.calls.append(("create_nutrition", meal_type, items, start, end))
+            # done が false の Operation では、作成された記録を特定できない
+            return [{} for _ in items]
+
+    result = await HealthService(UnfinishedRepository()).log_meal(
+        "LUNCH", [{"food_name": "親子丼", "energy_kcal": 600}], date="2026-01-31", time="12:30"
+    )
+
+    assert result["records"][0]["name"] is None
+    assert "get_nutrition_log" in result["records"][0]["summary"]
+    # 記録そのものの要約は、外側の summary では変わらない
+    assert "親子丼 600 kcal" in result["summary"]
+
+
+def test_parse_meal_items_allows_zero():
+    items = HealthService.parse_meal_items(
+        [{"food_name": "水", "energy_kcal": 0, "protein_g": 0}]
+    )
+
+    assert items[0]["energy_kcal"] == 0.0
+    assert items[0]["protein_g"] == 0.0
+
+
+@pytest.mark.parametrize("date, time", [("2026/01/31", None), (None, "12時")])
+async def test_log_water_rejects_an_invalid_date_or_time_without_calling_the_api(date, time):
+    repository = FakeNutritionRepository()
+
+    with pytest.raises(ValueError):
+        await HealthService(repository).log_water(500, date=date, time=time)
+
+    assert repository.calls == []
+
+
+async def test_log_water_tells_how_to_find_the_name_when_the_operation_is_unfinished():
+    class UnfinishedRepository(FakeNutritionRepository):
+        async def create_hydration_log(self, amount_ml, start, end):
+            self.calls.append(("create_hydration", amount_ml, start, end))
+            return {}
+
+    result = await HealthService(UnfinishedRepository()).log_water(
+        500, date="2026-01-31", time="15:00"
+    )
+
+    assert result["record"]["name"] is None
+    assert "get_nutrition_log" in result["record"]["summary"]
+    assert result["summary"] == "2026-01-31T15:00 に 水分 500 ml を記録しました"
+
+
+async def test_log_water_allows_zero():
+    repository = FakeNutritionRepository()
+
+    result = await HealthService(repository).log_water(0, date="2026-01-31", time="15:00")
+
+    assert repository.calls[0][:2] == ("create_hydration", 0.0)
+    assert "0 ml" in result["summary"]
+
+
+def test_parse_log_interval_crosses_midnight_at_the_end_of_the_day():
+    now = dt.datetime(2026, 1, 31, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=9)))
+
+    start, end = HealthService.parse_log_interval("2026-01-31", "23:59", now)
+
+    assert start < end
+    assert end == dt.datetime(2026, 2, 1, 0, 0, tzinfo=now.tzinfo)

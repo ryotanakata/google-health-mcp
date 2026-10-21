@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NotRequired
+
 from typing_extensions import TypedDict
 
 
@@ -156,3 +158,85 @@ class ActivityTrend(TypedDict):
     totals: ActivityTrendTotals
     # データのない日を除いた平均
     averages: ActivityTrendAverages
+
+
+class MealItem(TypedDict):
+    """log_meal が受け取る1品目。PFC は分かっている分だけ渡せばよい。"""
+
+    food_name: str
+    energy_kcal: float
+    protein_g: NotRequired[float | None]
+    fat_g: NotRequired[float | None]
+    carbohydrate_g: NotRequired[float | None]
+
+
+class NutritionEntry(TypedDict):
+    # delete_nutrition_logs に渡すデータポイントの識別子
+    name: str | None
+    food_name: str | None
+    meal_type: str | None
+    time: str | None
+    energy_kcal: float | None
+    protein_g: float | None
+    fat_g: float | None
+    carbohydrate_g: float | None
+
+
+class HydrationEntry(TypedDict):
+    name: str | None
+    time: str | None
+    amount_ml: float | None
+
+
+class NutritionTotals(TypedDict):
+    energy_kcal: float | None
+    protein_g: float | None
+    fat_g: float | None
+    carbohydrate_g: float | None
+    water_ml: float | None
+
+
+class NutritionLog(TypedDict):
+    date: str
+    totals: NutritionTotals
+    meals: list[NutritionEntry]
+    hydration: list[HydrationEntry]
+
+
+class LoggedRecord(TypedDict):
+    # create は Operation を返す。完了前（done=false）は作成された記録を特定できず None になる
+    name: str | None
+    summary: str
+
+
+class MealLog(TypedDict):
+    meal_type: str
+    logged_at: str
+    records: list[LoggedRecord]
+    total_energy_kcal: float
+    summary: str
+
+
+class WaterLog(TypedDict):
+    logged_at: str
+    record: LoggedRecord
+    summary: str
+
+
+class DeletedLogs(TypedDict):
+    names: list[str]
+    count: int
+    summary: str
+
+
+class PairedDevice(TypedDict):
+    device_version: str | None
+    device_type: str | None
+    battery_status: str | None
+    battery_level: int | None
+    last_sync_time: str | None
+
+
+class PairedDevices(TypedDict):
+    devices: list[PairedDevice]
+    count: int
