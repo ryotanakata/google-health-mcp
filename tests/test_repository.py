@@ -95,6 +95,23 @@ async def test_fetch_sleep_sessions_filters_by_civil_end_time(repository):
 
 
 @respx.mock
+async def test_fetch_heart_rate_filters_resting_by_date(repository):
+    route = respx.get(f"{BASE}/daily-resting-heart-rate/dataPoints").mock(
+        return_value=Response(200, json={"dataPoints": []})
+    )
+    respx.post(f"{BASE}/time-in-heart-rate-zone/dataPoints:dailyRollUp").mock(
+        return_value=Response(200, json={})
+    )
+
+    await repository.fetch_heart_rate(dt.date(2026, 1, 2))
+
+    assert route.calls.last.request.url.params["filter"] == (
+        'daily_resting_heart_rate.date >= "2026-01-02" '
+        'AND daily_resting_heart_rate.date < "2026-01-03"'
+    )
+
+
+@respx.mock
 async def test_fetch_exercises_pages_and_splits_by_90_days(repository):
     def respond(request):
         if request.url.params.get("pageToken") == "next":

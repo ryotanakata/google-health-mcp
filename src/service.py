@@ -184,7 +184,9 @@ class HealthService:
                 {
                     "vo2_max": HealthService._rounded(vo2_max.get("vo2Max"), 1),
                     "cardio_fitness_level": vo2_max.get("cardioFitnessLevel"),
-                    "estimated": vo2_max.get("estimated"),
+                    # proto3 JSON は値 false を省略する。vo2Max が返っている記録で
+                    # estimated が欠けていれば「推定ではない」の意味になる
+                    "estimated": vo2_max.get("estimated", False),
                 }
                 if vo2_max
                 else None
@@ -195,13 +197,21 @@ class HealthService:
     def summarize_body_measurements(
         start: dt.date, end: dt.date, points: dict[str, list[dict]]
     ) -> BodyMeasurements:
-        weight_kg = {
-            date: grams / 1000
-            for date, grams in HealthService._daily_last_sample(
-                points.get("weight"), "weight", "weightGrams"
-            ).items()
-        }
-        body_fat = HealthService._daily_last_sample(points.get("body-fat"), "bodyFat", "percentage")
+        weight_kg = HealthService._in_range(
+            {
+                date: grams / 1000
+                for date, grams in HealthService._daily_last_sample(
+                    points.get("weight"), "weight", "weightGrams"
+                ).items()
+            },
+            start,
+            end,
+        )
+        body_fat = HealthService._in_range(
+            HealthService._daily_last_sample(points.get("body-fat"), "bodyFat", "percentage"),
+            start,
+            end,
+        )
         days: list[BodyMeasurementDay] = [
             {
                 "date": date,
@@ -422,6 +432,16 @@ class HealthService:
             if previous is None or previous[0] <= physical_time:
                 latest[date] = (physical_time, float(value))
         return {date: value for date, (_, value) in latest.items()}
+
+    @staticmethod
+    def _in_range(
+        values_by_date: dict[str, float], start: dt.date, end: dt.date
+    ) -> dict[str, float]:
+        """絞り込みは現地時刻の filter で API に任せる一方、記録日は physicalTime から算出する
+        ため、境界日で両者がずれても期間外の日を返さないようにする。
+        """
+        first, last = start.isoformat(), end.isoformat()
+        return {date: value for date, value in values_by_date.items() if first <= date <= last}
 
     @staticmethod
     def _measurement_stats(values_by_date: dict[str, float], digits: int) -> MeasurementStats:

@@ -703,3 +703,86 @@ async def test_activity_trend_range_up_to_max_days_is_accepted():
     repository = FakeRepository()
     await HealthService(repository).get_activity_trend("2026-01-01", "2026-03-31")
     assert repository.calls == [("activity_trend", dt.date(2026, 1, 1), dt.date(2026, 3, 31))]
+
+
+def test_summarize_health_metrics_treats_missing_estimated_as_false():
+    result = HealthService.summarize_health_metrics(
+        "2026-01-02",
+        {"daily-vo2-max": [{"dailyVo2Max": {"vo2Max": 41.0, "cardioFitnessLevel": "GOOD"}}]},
+    )
+    assert result["vo2_max"] == {
+        "vo2_max": 41.0,
+        "cardio_fitness_level": "GOOD",
+        "estimated": False,
+    }
+
+
+def test_summarize_body_measurements_drops_records_outside_the_range():
+    points = {
+        "weight": [
+            _weight(70000.0, "2025-12-01T12:00:00Z"),
+            _weight(69000.0, "2026-01-10T12:00:00Z"),
+            _weight(68000.0, "2026-03-01T12:00:00Z"),
+        ],
+        "body-fat": [
+            {
+                "bodyFat": {
+                    "percentage": 18.0,
+                    "sampleTime": {
+                        "physicalTime": "2025-12-01T12:00:00Z",
+                        "utcOffset": "32400s",
+                    },
+                }
+            }
+        ],
+    }
+    result = HealthService.summarize_body_measurements(
+        dt.date(2026, 1, 1), dt.date(2026, 1, 31), points
+    )
+    assert [day["date"] for day in result["days"]] == ["2026-01-10"]
+    assert result["weight_kg"]["count"] == 1
+    assert result["weight_kg"]["min"] == 69.0
+    assert result["body_fat_percentage"]["count"] == 0
+
+
+def test_summarize_activity_trend_is_continuous_across_the_14_day_split():
+    # rollup は1リクエスト14日が上限なので、15日間は2回に分割して取得される
+    rollups = {
+        "total-calories": [
+            _rollup(2026, 1, 14, totalCalories={"kcalSum": 2100.0}),
+            _rollup(2026, 1, 15, totalCalories={"kcalSum": 2200.0}),
+        ]
+    }
+    result = HealthService.summarize_activity_trend(
+        dt.date(2026, 1, 1), dt.date(2026, 1, 15), rollups, []
+    )
+    dates = [day["date"] for day in result["days"]]
+    assert len(dates) == 15
+    assert dates == sorted(set(dates))
+    assert dates[0] == "2026-01-01" and dates[-1] == "2026-01-15"
+    by_date = {day["date"]: day["calories_out_kcal"] for day in result["days"]}
+    assert by_date["2026-01-14"] == 2100
+    assert by_date["2026-01-15"] == 2200
+    assert result["totals"]["calories_out_kcal"] == 4300
+
+
+async def test_body_measurements_range_up_to_max_days_is_accepted():
+    repository = FakeRepository()
+    await HealthService(repository).get_body_measurements("2026-01-01", "2026-03-31")
+    assert repository.calls == [
+        ("body_measurements", dt.date(2026, 1, 1), dt.date(2026, 3, 31))
+    ]
+
+
+async def test_body_measurements_accepts_a_single_day():
+    repository = FakeRepository()
+    result = await HealthService(repository).get_body_measurements("2026-01-01", "2026-01-01")
+    assert result["start_date"] == "2026-01-01"
+    assert result["end_date"] == "2026-01-01"
+
+
+async def test_body_measurements_reversed_range_is_rejected():
+    repository = FakeRepository()
+    with pytest.raises(ValueError, match="^start_date には end_date 以前の日付を指定してください$"):
+        await HealthService(repository).get_body_measurements("2026-02-01", "2026-01-01")
+    assert repository.calls == []
